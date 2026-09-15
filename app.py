@@ -117,7 +117,7 @@ st.markdown(
     }
 
     .uv-title {
-        color: #FFFFFF;
+        color: #FFFFFF !important;
         font-size: clamp(1.75rem, 3vw, 2.55rem);
         font-weight: 800;
         line-height: 1.08;
@@ -502,7 +502,7 @@ with col2:
 # =========================================================
 # CONFIGURACIÓN
 # =========================================================
-with st.expander("⚙️ Configuración avanzada", expanded=False):
+with st.expander("⚙️ Configuración avanzada", expanded=True):
     round_tol = st.number_input(
         "Tolerancia para revisar redondeo (Bs)",
         min_value=0.00,

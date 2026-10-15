@@ -375,3 +375,51 @@ def test_encabezados_reales_de_la_exportacion_sap():
               'Cod. Acreedor', 'Texto Posición', 'Doc. Logístico']
     sel, av = ro.detectar_columnas_sap(reales)
     assert sel == {'usuario': 'Usuario', 'asiento': 'Nro. Documento'} and av == []
+
+
+# ------------------------------------------------------------- formatos .xls / .xlsx
+def _resumen_hojas(ruta):
+    wb = openpyxl.load_workbook(ruta)
+    return {ws.title: [[c.value for c in f] for f in ws.iter_rows()] for ws in wb}
+
+
+def _corrida_con_sap(tmp_path, sap_alterno):
+    _, siat = escenario(tmp_path)
+    motor = tmp_path / 'm_alt.xlsx'
+    _, m = run_audit(sap_alterno, siat, output_path=motor)
+    diag = ro.generar_reporte_operativo(motor, sap_alterno, tmp_path / 'r_alt.xlsx')
+    return m, diag, tmp_path / 'r_alt.xlsx'
+
+
+def test_extension_incorrecta_xlsx_guardado_como_xls(tmp_path):
+    """Un .xlsx renombrado a .xls (o al revés) se lee por contenido, igual que el motor."""
+    sap, _ = escenario(tmp_path)
+    base_m, base_d, base_r = _corrida_con_sap(tmp_path, sap)
+    falso = tmp_path / 'SAP_falso.xls'
+    falso.write_bytes(sap.read_bytes())
+    m, d, r = _corrida_con_sap(tmp_path, falso)
+    assert m == base_m and d['filas_con_usuario'] == base_d['filas_con_usuario'] == 8
+    assert _resumen_hojas(r) == _resumen_hojas(base_r)
+
+
+def test_xls_binario_real_da_el_mismo_reporte_que_xlsx(tmp_path):
+    """.xls BIFF real (convertido con LibreOffice): mismo resultado, usuario/asiento y ceros incluidos."""
+    import shutil
+    soffice = shutil.which('soffice') or shutil.which('libreoffice')
+    if not soffice:
+        pytest.skip('LibreOffice no disponible para generar un .xls de prueba')
+    pytest.importorskip('xlrd')
+    sap, _ = escenario(tmp_path)
+    base_m, base_d, base_r = _corrida_con_sap(tmp_path, sap)
+    out = tmp_path / 'xls'
+    out.mkdir()
+    subprocess.run([soffice, '--headless', '--convert-to', 'xls:MS Excel 97', '--outdir', str(out), str(sap)],
+                   check=True, capture_output=True, timeout=180)
+    xls = out / 'SAP.xls'
+    assert xls.read_bytes()[:4] == b'\xd0\xcf\x11\xe0'  # contenedor OLE2 = .xls real
+    m, d, r = _corrida_con_sap(tmp_path, xls)
+    assert m == base_m and d['filas_con_usuario'] == 8 and d['filas_con_asiento'] == 8
+    wb = openpyxl.load_workbook(r)
+    f = {x['FACTURA SAP']: x for x in _filas(wb['CONTROL GENERAL'])}
+    assert f['104']['N.º ASIENTO SAP'] == '0001900104'  # ceros iniciales intactos
+    assert _resumen_hojas(r) == _resumen_hojas(base_r)

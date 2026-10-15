@@ -279,7 +279,11 @@ def test_alias_de_encabezados(tmp_path, u, a):
     ('Nro. Factura', None), ('Fec. Factura', None), ('NIT Proveedor', None),
     ('Precio Unitario', None), ('Nro. DUI/DIM', None), ('Cod. Autorización', None),
     ('Doc. Factura', None), ('Usuario Modificación', None), ('Aprobado por usuario', None),
-    ('Asiento Factura', None), ('Cód. Control', None), ('Nro. Documento', None),
+    ('Asiento Factura', None), ('Cód. Control', None), ('Doc. Anulacion', None),
+    ('Doc. Logístico', None), ('Cl. Documento', None), ('Fec. Modificación', None),
+    ('Cod. Acreedor', None), ('Nro. Documento Factura', None),
+    # Encabezados de la exportación SAP real (sep-2026):
+    ('Nro. Documento', 'asiento'),
 ])
 def test_clasificacion_de_encabezados(encabezado, esperado):
     assert ro._classify_header(encabezado) == esperado
@@ -358,3 +362,16 @@ def test_streamlit_app_ejecuta_sin_errores(tmp_path):
     at = AppTest.from_file(str(RAIZ / 'app.py'), default_timeout=60).run()
     assert not at.exception
     assert any('Carga ambos archivos' in i.value for i in at.info)
+
+
+def test_encabezados_reales_de_la_exportacion_sap():
+    """Los 32 encabezados reales (solo nombres) deben dar exactamente Usuario y Nro. Documento."""
+    reales = ['N°', 'Especificación', 'NIT Proveedor', 'Razón Social Proveedor', 'Cod. Autorización',
+              'Nro. Factura', 'Nro. DUI/DIM', 'Fec. Factura', 'Importe Total Compra', 'Importe ICE',
+              'Importe IEHD', 'Importe IPJ', 'Tasas', 'Otro no Sujeto a CF', 'Importes Exentos',
+              'Importe C.G. Tasa Cero', 'Sub total', 'Desc. Bon. y Rebajas Obtenidas', 'Importe Gift Card',
+              'Importe Base CF', 'Crédito Fiscal IVA', 'Tipo de Compra', 'Cód. Control', 'Nro. Documento',
+              'Cl. Documento', 'Fec. Contabilización', 'Fec. Modificación', 'Doc. Anulacion', 'Usuario',
+              'Cod. Acreedor', 'Texto Posición', 'Doc. Logístico']
+    sel, av = ro.detectar_columnas_sap(reales)
+    assert sel == {'usuario': 'Usuario', 'asiento': 'Nro. Documento'} and av == []

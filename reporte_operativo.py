@@ -155,6 +155,9 @@ _USUARIO_PREFERIDO = {'CREADO', 'CREACION', 'REGISTRO', 'REGISTRADO', 'INGRESO',
 _USUARIO_EXCLUIR_PREFIJOS = ('MODIF', 'CAMBI', 'ACTUALIZ', 'APROB', 'AUTORIZ', 'ANUL')
 _ASIENTO_TOKENS = {'ASIENTO', 'BELNR'}
 _ASIENTO_FRASES = ('DOCUMENTO CONTABLE', 'DOC CONTABLE', 'DOCUMENTO SAP', 'DOC SAP')
+# Encabezado genérico, válido SOLO como coincidencia exacta. Confirmado en la exportación SAP
+# real (septiembre 2026): 'Nro. Documento' = documento contable de 10 dígitos, clases KR/RE.
+_ASIENTO_EXACTOS = {'NRO DOCUMENTO', 'NRO DE DOCUMENTO', 'NUMERO DOCUMENTO', 'NUMERO DE DOCUMENTO'}
 # Un asiento nunca es un dato de la factura.
 _ASIENTO_EXCLUIR = {'FACTURA', 'DUI', 'DIM', 'AUTORIZACION', 'CUF', 'NIT', 'CONTROL'}
 
@@ -167,7 +170,8 @@ def _classify_header(txt: Any) -> str | None:
     tokens = set(t.split())
     marco = f' {t} '
 
-    es_asiento = bool(tokens & _ASIENTO_TOKENS) or any(f' {f} ' in marco for f in _ASIENTO_FRASES)
+    es_asiento = (bool(tokens & _ASIENTO_TOKENS) or t in _ASIENTO_EXACTOS
+                  or any(f' {f} ' in marco for f in _ASIENTO_FRASES))
     if es_asiento and not (tokens & _ASIENTO_EXCLUIR):
         return 'asiento'
 

@@ -361,7 +361,7 @@ def test_streamlit_app_ejecuta_sin_errores(tmp_path):
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file(str(RAIZ / 'app.py'), default_timeout=60).run()
     assert not at.exception
-    assert any('Carga ambos archivos' in i.value for i in at.info)
+    assert any('Carga el Excel de SAP y el CSV del SIAT' in i.value for i in at.info)
 
 
 def test_encabezados_reales_de_la_exportacion_sap():

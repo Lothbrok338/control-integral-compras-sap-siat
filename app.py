@@ -478,27 +478,36 @@ st.markdown(
 # =========================================================
 st.markdown('<div class="uv-section-title">Archivos de entrada</div>', unsafe_allow_html=True)
 
-col1, col2 = st.columns(2, gap="large")
+uploaded_files = st.file_uploader(
+    "Carga aquí el Excel de SAP y el CSV del SIAT (selecciona o arrastra ambos a la vez)",
+    type=["xlsx", "xls", "csv"],
+    accept_multiple_files=True,
+    key="archivos",
+    help="El Excel (.xlsx/.xls) se toma como SAP y el CSV como SIAT. No importa el orden.",
+)
 
-with col1:
-    sap_file = st.file_uploader(
-        "1. Archivo de compras SAP",
-        type=["xlsx", "xls"],
-        key="sap",
-        help="Selecciona el archivo Excel exportado desde SAP.",
-    )
-    if sap_file:
-        st.success(f"✓ SAP cargado · {sap_file.name} · {_format_size(sap_file.size)}")
+# Clasificación automática por extensión: Excel = SAP, CSV = SIAT.
+sap_candidates = [f for f in (uploaded_files or []) if Path(f.name).suffix.lower() in (".xlsx", ".xls")]
+siat_candidates = [f for f in (uploaded_files or []) if Path(f.name).suffix.lower() == ".csv"]
+sap_file = sap_candidates[0] if len(sap_candidates) == 1 else None
+siat_file = siat_candidates[0] if len(siat_candidates) == 1 else None
 
-with col2:
-    siat_file = st.file_uploader(
-        "2. Archivo de compras SIAT",
-        type=["csv"],
-        key="siat",
-        help="Selecciona el archivo CSV exportado desde SIAT.",
-    )
-    if siat_file:
-        st.success(f"✓ SIAT cargado · {siat_file.name} · {_format_size(siat_file.size)}")
+if len(sap_candidates) > 1:
+    st.error("Cargaste más de un Excel de SAP. Deja solo uno.")
+if len(siat_candidates) > 1:
+    st.error("Cargaste más de un CSV del SIAT. Deja solo uno.")
+if sap_file:
+    st.success(f"✓ SAP detectado · {sap_file.name} · {_format_size(sap_file.size)}")
+if siat_file:
+    st.success(f"✓ SIAT detectado · {siat_file.name} · {_format_size(siat_file.size)}")
+if uploaded_files and not (sap_file and siat_file):
+    faltan = []
+    if not sap_candidates:
+        faltan.append("el Excel de SAP (.xlsx/.xls)")
+    if not siat_candidates:
+        faltan.append("el CSV del SIAT (.csv)")
+    if faltan:
+        st.warning("Falta " + " y ".join(faltan) + ".")
 
 # =========================================================
 # CONFIGURACIÓN
@@ -544,7 +553,7 @@ if ready:
         unsafe_allow_html=True,
     )
 else:
-    st.info("Carga ambos archivos para habilitar la auditoría.")
+    st.info("Carga el Excel de SAP y el CSV del SIAT para habilitar la auditoría.")
 
 # =========================================================
 # EJECUCIÓN
@@ -637,12 +646,6 @@ if st.session_state.get("metrics"):
         )
         for advertencia in diag.get("advertencias", []):
             st.warning(advertencia)
-
-    if m.get("repairs", 0):
-        st.warning(
-            f"El CSV del SIAT contenía {m['repairs']} incidencia(s) estructural(es) reparada(s) "
-            "automáticamente. Las líneas afectadas se listan en las advertencias de la pestaña RESUMEN."
-        )
 
 # =========================================================
 # DESCARGA

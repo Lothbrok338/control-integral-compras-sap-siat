@@ -1,0 +1,4 @@
+{
+  "_instrucciones": "Equivalencias de razón social VERIFICADAS manualmente y ligadas a un NIT concreto. Solo así una sigla o nombre comercial (ej. sigla vs nombre completo) se clasifica como diferencia menor. Formato de cada entrada: {\"nit\": \"1234567\", \"nombres\": [\"NOMBRE EN SAP\", \"NOMBRE EN SIAT\"], \"nota\": \"quién/cómo se verificó\"}. El NIT se escribe sin ceros a la izquierda (igual que lo normaliza el motor).",
+  "equivalencias": []
+}

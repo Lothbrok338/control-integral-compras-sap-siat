@@ -37,92 +37,114 @@ def _filas(ws):
 
 
 # ---------------------------------------------------------------- estructura
-def test_exactamente_tres_hojas(corrida):
+HOJAS = ['CONTROL GENERAL', 'POR CONCILIAR', 'DIFERENCIAS MENORES']
+
+
+def test_exactamente_tres_hojas_en_orden(corrida):
     wb = corrida[0]
-    assert wb.sheetnames == ['CONTROL GENERAL', 'POR CONCILIAR', 'RESUMEN']
+    assert wb.sheetnames == HOJAS
+    assert 'RESUMEN' not in wb.sheetnames
 
 
 def test_columnas_A_a_D_control_general(corrida):
     ws = corrida[0]['CONTROL GENERAL']
     assert [ws.cell(1, i).value for i in range(1, 5)] == [
         'ESTADO', 'CAMPOS CON DIFERENCIA', 'USUARIO SAP', 'N.º ASIENTO SAP']
-    f = {r['FACTURA SAP']: r for r in _filas(ws)}
-    assert f['102']['ESTADO'] == 'DIFERENCIA'
+    f = {r['N.º FACTURA']: r for r in _filas(ws)}
+    assert f['102']['ESTADO'] == 'CRÍTICA · IMPORTE O TRIBUTARIO'
     assert 'Importe total compra' in f['102']['CAMPOS CON DIFERENCIA']
     assert (f['102']['USUARIO SAP'], f['102']['N.º ASIENTO SAP']) == ('LGOMEZ', '1900000102')
-    assert (f['101']['USUARIO SAP'], f['101']['N.º ASIENTO SAP']) == ('MPEREZ', '1900000101')
+    assert f['107']['ESTADO'] == 'CRÍTICA · IDENTIFICADOR'
+    assert f['104']['ESTADO'] == 'CRÍTICA · FECHA'
+
+
+def test_control_general_solo_diferencias_relevantes(corrida):
+    wb = corrida[0]
+    facturas = {r['N.º FACTURA'] for r in _filas(wb['CONTROL GENERAL'])}
+    assert facturas == {'102', '104', '107'}  # no OK (101), no menores (103)
+    assert {r['ESTADO'] for r in _filas(wb['CONTROL GENERAL'])} <= set(
+        ['CRÍTICA · IDENTIFICADOR', 'CRÍTICA · IMPORTE O TRIBUTARIO', 'CRÍTICA · FECHA', 'REVISIÓN DE IDENTIDAD'])
+    menores = {r['N.º FACTURA']: r for r in _filas(wb['DIFERENCIAS MENORES'])}
+    assert set(menores) == {'103'} and menores['103']['TIPO DE DIFERENCIA'] == 'REDONDEO'
+    assert 'dentro de la tolerancia' in menores['103']['MOTIVO DE CLASIFICACIÓN MENOR']
 
 
 def test_columna_B_es_la_de_la_hoja_original_del_motor(corrida):
     wb, _, _, motor_xlsx, _ = corrida
     original = {str(r['FACTURA SAP']): r['CAMPOS CON DIFERENCIA'] or ''
                 for r in _filas(openpyxl.load_workbook(motor_xlsx)['CONTROL GENERAL'])}
-    nuevo = {str(r['FACTURA SAP']): r['CAMPOS CON DIFERENCIA'] or ''
-             for r in _filas(wb['CONTROL GENERAL'])}
-    assert nuevo == original
+    nuevo = {str(r['N.º FACTURA']): r['CAMPOS CON DIFERENCIA'] or '' for r in _filas(wb['CONTROL GENERAL'])}
+    assert nuevo and all(original[k] == v for k, v in nuevo.items())
 
 
 def test_ceros_iniciales_del_asiento_se_conservan_como_texto(corrida):
     ws = corrida[0]['CONTROL GENERAL']
-    f = {r['FACTURA SAP']: r for r in _filas(ws)}
+    f = {r['N.º FACTURA']: r for r in _filas(ws)}
     assert f['104']['N.º ASIENTO SAP'] == '0001900104'
     celda = next(c for c in ws['D'][1:] if c.value == '0001900104')
     assert celda.data_type == 's' and celda.number_format == '@'
 
 
-def test_detalle_indica_campo_y_valores_sap_siat(corrida):
-    f = {r['FACTURA SAP']: r for r in _filas(corrida[0]['CONTROL GENERAL'])}
-    det = f['102']['DETALLE SAP / SIAT']
-    assert 'Importe total compra: SAP 250.00 → SIAT 205.00' in det or 'SAP 250 → SIAT 205' in det
-    assert 'Razón social: SAP PROVEEDOR DOS SA → SIAT PROVEEDOR DOS S.A.' in det
-    assert 'redondeo' in f['103']['DETALLE SAP / SIAT']
-    assert f['101']['DETALLE SAP / SIAT'] in (None, '')
+def test_valores_sap_y_siat_por_campo(corrida):
+    f = {r['N.º FACTURA']: r for r in _filas(corrida[0]['CONTROL GENERAL'])}
+    r = f['102']
+    assert 'Importe total compra: 250' in r['VALOR EN SAP'].replace('.00', '') or 'Importe total compra: 250.00' in r['VALOR EN SAP']
+    assert 'Importe total compra: 205' in r['VALOR EN SIAT'].replace('.00', '')
+    assert 'Razón social: PROVEEDOR DOS SA' in r['VALOR EN SAP'] and 'S.A.' in r['VALOR EN SIAT']
+    assert 'Razón social: MENOR' in r['CLASIFICACIÓN POR CAMPO']       # menor visible, no oculta lo crítico
+    assert 'Importe total compra: CRÍTICA' in r['CLASIFICACIÓN POR CAMPO']
+    assert r['DIFERENCIA IMPORTE (Bs)'] == 45
+    assert r['CUF / AUTORIZACIÓN'] == 'AUT0000102'
+    assert r['RAZÓN SOCIAL SIAT'] == 'PROVEEDOR DOS S.A.'
 
 
 # ----------------------------------------------------------- integridad datos
 def test_no_se_pierde_ninguna_factura(corrida):
     wb, m, diag, motor_xlsx, _ = corrida
     control = _filas(wb['CONTROL GENERAL'])
+    menores = _filas(wb['DIFERENCIAS MENORES'])
     pend = _filas(wb['POR CONCILIAR'])
-    assert len(control) == m['matched']
-    assert len(pend) == m['solo_sap'] + m['solo_siat'] + m['review']
-    por_situacion = {s: sum(1 for r in pend if r['SITUACION'] == s)
-                     for s in ('SOLO SAP', 'SOLO SIAT', 'REVISAR EMPAREJAMIENTO')}
-    assert por_situacion == {'SOLO SAP': m['solo_sap'], 'SOLO SIAT': m['solo_siat'],
-                             'REVISAR EMPAREJAMIENTO': m['review']}
-    # Todas las filas SAP/SIAT del motor siguen rastreables
-    filas_sap = {r['FILA SAP ORIGINAL'] for r in control} | {
-        r['FILA SAP ORIGINAL'] for r in pend if r['SITUACION'] == 'SOLO SAP'}
-    assert len(filas_sap) == m['sap']
+    ind = diag['indicadores']
+    # Todo lo emparejado está en exactamente un lugar (control, menores) o es OK (no se exporta)
+    assert len(control) + len(menores) + ind['sin_diferencias'] == m['matched']
+    assert not {r['FILA SAP ORIGINAL'] for r in control} & {r['FILA SAP ORIGINAL'] for r in menores}
+    # Todo lo no emparejado del motor aparece UNA sola vez en POR CONCILIAR
+    mw = openpyxl.load_workbook(motor_xlsx)
+    sap_sin = {r['_FILA_ORIGEN'] for r in _filas(mw['SOLO SAP'])}
+    siat_sin = {r['_FILA_ORIGEN'] for r in _filas(mw['SOLO SIAT'])}
+    sap_vistas = [r['FILA SAP ORIGINAL'] for r in pend if r['FILA SAP ORIGINAL'] is not None]
+    siat_vistas = [r['FILA SIAT ORIGINAL'] for r in pend if r['FILA SIAT ORIGINAL'] is not None]
+    assert set(sap_vistas) == sap_sin and set(siat_vistas) >= {s for s in siat_sin}
+    assert len(sap_vistas) == len(set(sap_vistas))                      # sin duplicar hallazgos
+    # Todas las filas SAP del motor siguen rastreables (control + menores + OK + sin pareja)
+    assert len(control) + len(menores) + ind['sin_diferencias'] + len(sap_sin) == m['sap']
     assert diag['total_conciliadas'] == m['matched']
 
 
-def test_conteos_estado_coinciden_con_metricas(corrida):
-    wb, m, *_ = corrida
-    cuenta = pd.Series([r['ESTADO'] for r in _filas(wb['CONTROL GENERAL'])]).value_counts().to_dict()
-    assert cuenta.get('OK', 0) == m['ok']
-    assert cuenta.get('DIFERENCIA', 0) == m['diff']
-    assert cuenta.get('REVISAR REDONDEO', 0) == m['rounding']
-    res = {r[0].value: r[1].value for r in wb['RESUMEN'].iter_rows(min_row=4, max_row=12)}
-    assert res['Facturas emparejadas'] == m['matched']
-    assert res['Facturas sin diferencias'] == m['ok']
-    assert res['Facturas con diferencias'] == m['diff']
-    assert res['Redondeos'] == m['rounding']
-    assert res['Registros solo SAP'] == m['solo_sap']
-    assert res['Registros solo SIAT'] == m['solo_siat']
-    assert res['Candidatos pendientes de revisión'] == m['review']
+def test_indicadores_suman_y_no_alteran_las_cifras_del_motor(corrida):
+    wb, m, diag, *_ = corrida
+    ind = diag['indicadores']
+    assert ind['emparejadas'] == m['matched'] and ind['sin_diferencias'] == m['ok']
+    assert (ind['sin_diferencias'] + ind['criticas'] + ind['revision_identidad']
+            + ind['menores_nominales'] + ind['solo_redondeo']) == m['matched']
+    assert ind['solo_sap'] == m['solo_sap'] and ind['solo_siat'] == m['solo_siat']
+    assert ind['candidatos'] == m['review']
+    assert ind['en_control_general'] == len(_filas(wb['CONTROL GENERAL']))
+    assert ind['en_menores'] == len(_filas(wb['DIFERENCIAS MENORES']))
+    # lo que el motor llama diferencias/redondeos se reparte sin perder facturas
+    assert ind['criticas'] + ind['revision_identidad'] + ind['menores_nominales'] + ind['solo_redondeo'] == m['diff'] + m['rounding']
 
 
 def test_importes_conservan_valores_originales(corrida):
     wb, _, _, motor_xlsx, _ = corrida
     orig = {(r['FACTURA SAP'], r['FILA SAP']): (r['IMPORTE SAP'], r['IMPORTE SIAT'])
             for r in _filas(openpyxl.load_workbook(motor_xlsx)['CONTROL GENERAL'])}
-    nuevo = {(r['FACTURA SAP'], r['FILA SAP ORIGINAL']): (r['IMPORTE SAP (Bs)'], r['IMPORTE SIAT (Bs)'])
-             for r in _filas(wb['CONTROL GENERAL'])}
-    assert nuevo == orig
-    assert nuevo[('103', 4)] == (500, 500.03)  # sin redondear ni alterar
-    ws = wb['CONTROL GENERAL']
-    assert ws['N2'].number_format.startswith('#,##0.00')
+    for hoja in ('CONTROL GENERAL', 'DIFERENCIAS MENORES'):
+        for r in _filas(wb[hoja]):
+            assert orig[(r['N.º FACTURA'], r['FILA SAP ORIGINAL'])] == (r['IMPORTE SAP (Bs)'], r['IMPORTE SIAT (Bs)'])
+    menor = _filas(wb['DIFERENCIAS MENORES'])[0]
+    assert (menor['IMPORTE SAP (Bs)'], menor['IMPORTE SIAT (Bs)']) == (500, 500.03)  # sin redondear
+    assert wb['CONTROL GENERAL']['K2'].number_format.startswith('#,##0.00')
 
 
 def test_motor_y_su_excel_permanecen_intactos(tmp_path):
@@ -132,30 +154,39 @@ def test_motor_y_su_excel_permanecen_intactos(tmp_path):
     antes = hashlib.sha256(motor_xlsx.read_bytes()).hexdigest()
     ro.generar_reporte_operativo(motor_xlsx, sap, tmp_path / 'r.xlsx')
     assert hashlib.sha256(motor_xlsx.read_bytes()).hexdigest() == antes
-    # motor_auditoria.py no fue tocado respecto del commit de partida
-    base = subprocess.run(['git', 'diff', '--quiet', 'HEAD', '--', 'motor_auditoria.py'],
-                          cwd=RAIZ).returncode
-    assert base == 0
+    # el motor no fue tocado respecto del commit de partida de esta fase
+    if subprocess.run(['git', 'cat-file', '-e', 'd0c07e1'], cwd=RAIZ, capture_output=True).returncode != 0:
+        pytest.skip('commit de referencia no disponible en este checkout')
+    for archivo in ('motor_auditoria.py',):
+        assert subprocess.run(['git', 'diff', '--quiet', 'd0c07e1', '--', archivo], cwd=RAIZ).returncode == 0
 
 
 # --------------------------------------------------------------- ordenamiento
-def test_orden_diferencia_redondeo_ok_y_importe_descendente(corrida):
+def test_orden_por_gravedad_y_luego_importe_descendente(corrida):
     filas = _filas(corrida[0]['CONTROL GENERAL'])
-    rango = {'DIFERENCIA': 0, 'REVISAR REDONDEO': 1, 'OK': 2}
+    rango = {'CRÍTICA · IDENTIFICADOR': 0, 'CRÍTICA · IMPORTE O TRIBUTARIO': 1,
+             'CRÍTICA · FECHA': 2, 'REVISIÓN DE IDENTIDAD': 3}
     claves = [(rango[r['ESTADO']], -r['IMPORTE SAP (Bs)']) for r in filas]
     assert claves == sorted(claves)
-    assert [r['FACTURA SAP'] for r in filas] == ['107', '102', '103', '101', '104']
+    assert [r['N.º FACTURA'] for r in filas] == ['107', '102', '104']
 
 
 def test_filtros_paneles_y_formato(corrida):
     wb = corrida[0]
-    for nombre in ('CONTROL GENERAL', 'POR CONCILIAR'):
+    for nombre in HOJAS:
         ws = wb[nombre]
         assert ws.freeze_panes == 'E2'  # A:D siempre visibles
         assert ws.auto_filter.ref == f'A1:{ws.cell(1, ws.max_column).column_letter}{ws.max_row}'
+        assert not ws.merged_cells.ranges                                  # sin celdas combinadas
     ws = wb['CONTROL GENERAL']
     assert ws['B1'].fill.fgColor.rgb.endswith('C5004E')  # magenta institucional
     assert ws['A1'].fill.fgColor.rgb.endswith('31343A')  # grafito
+    assert ws.sheet_properties.tabColor.rgb.endswith('C5004E')
+    men = wb['DIFERENCIAS MENORES']
+    assert men.sheet_properties.tabColor.rgb.endswith('FFE699')          # amarillo suave, última pestaña
+    assert men['A2'].fill.fgColor.rgb.endswith(ro.AMARILLO_SUAVE)
+    assert 'NO significa' in men['A1'].comment.text
+    assert ws['A2'].fill.fgColor.rgb.endswith(ro.ROJO_SUAVE)
 
 
 def test_por_conciliar_agrupa_y_no_acepta_candidatos(corrida):
@@ -167,7 +198,9 @@ def test_por_conciliar_agrupa_y_no_acepta_candidatos(corrida):
             assert 'NO aceptado' in r['MOTIVO / ACCION']
         if r['SITUACION'] == 'SOLO SIAT':
             assert r['USUARIO SAP'] is None and r['N.º ASIENTO SAP'] is None
-    # ningún candidato aparece también dentro de CONTROL GENERAL
+    # un candidato absorbe su fila solo-SAP/solo-SIAT: ningún hallazgo aparece dos veces
+    candidatos_sap = {r['FILA SAP ORIGINAL'] for r in pend if r['SITUACION'] == 'REVISAR EMPAREJAMIENTO'}
+    assert not candidatos_sap & {r['FILA SAP ORIGINAL'] for r in pend if r['SITUACION'] == 'SOLO SAP'}
     en_control = {r['FILA SAP ORIGINAL'] for r in _filas(corrida[0]['CONTROL GENERAL'])}
     assert not en_control & {r['FILA SAP ORIGINAL'] for r in pend}
 
@@ -177,7 +210,7 @@ def test_duplicados_se_resuelven_por_fila_y_no_se_mezclan(corrida):
     """Dos filas SAP con mismo NIT+factura y asientos distintos: cada una conserva el suyo."""
     pend = _filas(corrida[0]['POR CONCILIAR'])
     dup = {r['FILA SAP ORIGINAL']: (r['USUARIO SAP'], r['N.º ASIENTO SAP'])
-           for r in pend if r['SITUACION'] == 'SOLO SAP' and r['FACTURA SAP'] == '108'}
+           for r in pend if r['FACTURA SAP'] == '108'}
     assert dup == {9: ('USRA', '1900000108'), 10: ('USRB', '1900000109')}
     assert corrida[2]['ambiguas'] == 0 and corrida[2]['advertencias'] == []
 
@@ -240,9 +273,9 @@ def test_nit_con_ceros_y_formatos_numericos(tmp_path):
 def test_sin_columnas_usuario_asiento_deja_vacio_y_advierte(tmp_path):
     cols = [c for c in COLS_BASE if c not in ('Usuario', 'N° Asiento')]
     wb, m, diag, *_ = _generar(tmp_path, columnas=cols)
-    f = _filas(wb['CONTROL GENERAL'])
-    assert all(r['USUARIO SAP'] is None and r['N.º ASIENTO SAP'] is None for r in f)
-    assert len(f) == m['matched']  # el reporte sigue completo
+    f = _filas(wb['CONTROL GENERAL']) + _filas(wb['DIFERENCIAS MENORES'])
+    assert f and all(r['USUARIO SAP'] is None and r['N.º ASIENTO SAP'] is None for r in f)
+    assert len(f) + diag['indicadores']['sin_diferencias'] == m['matched']  # el reporte sigue completo
     assert any('usuario' in a.lower() for a in diag['advertencias'])
     assert any('Encabezados de la hoja SAP leída' in a for a in diag['advertencias'])
     assert diag['filas_con_usuario'] == 0 and diag['filas_con_asiento'] == 0
@@ -250,8 +283,8 @@ def test_sin_columnas_usuario_asiento_deja_vacio_y_advierte(tmp_path):
 
 def test_solo_asiento_o_solo_usuario(tmp_path):
     wb, _, diag, *_ = _generar(tmp_path, columnas=[c for c in COLS_BASE if c != 'Usuario'])
-    f = {r['FACTURA SAP']: r for r in _filas(wb['CONTROL GENERAL'])}
-    assert f['101']['USUARIO SAP'] is None and f['101']['N.º ASIENTO SAP'] == '1900000101'
+    f = {r['N.º FACTURA']: r for r in _filas(wb['CONTROL GENERAL'])}
+    assert f['102']['USUARIO SAP'] is None and f['102']['N.º ASIENTO SAP'] == '1900000102'
     assert diag['asiento_detectado'] and not diag['usuario_detectado']
 
 
@@ -343,8 +376,8 @@ def test_sin_ninguna_conciliacion_genera_hojas_vacias_validas(tmp_path):
     run_audit(sap, siat, output_path=m)
     ro.generar_reporte_operativo(m, sap, tmp_path / 'r.xlsx')
     wb = openpyxl.load_workbook(tmp_path / 'r.xlsx')
-    assert wb.sheetnames == ['CONTROL GENERAL', 'POR CONCILIAR', 'RESUMEN']
-    assert wb['CONTROL GENERAL'].max_row == 1
+    assert wb.sheetnames == HOJAS
+    assert wb['CONTROL GENERAL'].max_row == 1 and wb['DIFERENCIAS MENORES'].max_row == 1
     assert wb['POR CONCILIAR'].max_row == 3
 
 
@@ -420,6 +453,6 @@ def test_xls_binario_real_da_el_mismo_reporte_que_xlsx(tmp_path):
     m, d, r = _corrida_con_sap(tmp_path, xls)
     assert m == base_m and d['filas_con_usuario'] == 8 and d['filas_con_asiento'] == 8
     wb = openpyxl.load_workbook(r)
-    f = {x['FACTURA SAP']: x for x in _filas(wb['CONTROL GENERAL'])}
+    f = {x['N.º FACTURA']: x for x in _filas(wb['CONTROL GENERAL'])}
     assert f['104']['N.º ASIENTO SAP'] == '0001900104'  # ceros iniciales intactos
     assert _resumen_hojas(r) == _resumen_hojas(base_r)

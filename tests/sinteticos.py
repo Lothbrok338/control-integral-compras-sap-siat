@@ -41,13 +41,16 @@ def sap_row(nit, factura, aut, fecha, total, razon, usuario='USR01', asiento='19
     return row
 
 
-def siat_row(corr, nit, factura, aut, fecha, total, razon):
+def siat_row(corr, nit, factura, aut, fecha, total, razon, over=None):
     d = datetime.strptime(fecha, '%Y-%m-%d').strftime('%d/%m/%Y')
-    return [
+    fila = [
         str(corr), str(nit), razon, aut, str(factura), '0', d, f'{total:.2f}',
         '0', '0', '0', '0', '0', '0', '0', f'{total:.2f}', '0', '0',
         f'{total * 0.87:.2f}', f'{total * 0.13:.2f}', TIPO_SIAT, '0', 'SI', 'VIGENTE',
     ]
+    for idx, valor in (over or {}).items():  # idx = posición de columna SIAT (0-based)
+        fila[idx] = valor
+    return fila
 
 
 def escribir_siat(path: Path, filas: list[list]) -> Path:
@@ -70,9 +73,9 @@ def escenario(tmp: Path, extra_sap=None, extra_siat=None, columnas=None, nombre_
     """Escenario base. Devuelve (ruta_sap, ruta_siat).
 
     Facturas SAP (fila física Excel = posición + 2):
-      101 OK            102 DIFERENCIA (importe y razón social)   103 REDONDEO
-      104 OK con NIT y asiento con ceros a la izquierda           105 SOLO SAP
-      (fila vacía)      107 DIFERENCIA de autorización (2 filas SIAT con misma factura)
+      101 OK            102 CRÍTICA (importe; razón social con variación formal)   103 REDONDEO
+      104 CRÍTICA (fecha) con NIT y asiento con ceros a la izquierda               105 SOLO SAP
+      (fila vacía)      107 CRÍTICA de autorización (2 filas SIAT con misma factura)
       108 duplicada en SAP con asientos distintos (+1 en SIAT): candidatos ambiguos
     SIAT adicional: 106 SOLO SIAT.
     """
@@ -91,7 +94,7 @@ def escenario(tmp: Path, extra_sap=None, extra_siat=None, columnas=None, nombre_
         siat_row(1, '1000000001', 101, 'AUT0000101', '2025-01-10', 100.00, 'PROVEEDOR UNO SRL'),
         siat_row(2, '1000000002', 102, 'AUT0000102', '2025-01-11', 205.00, 'PROVEEDOR DOS S.A.'),
         siat_row(3, '1000000003', 103, 'AUT0000103', '2025-01-12', 500.03, 'PROVEEDOR TRES'),
-        siat_row(4, '123456', 104, 'AUT0000104', '2025-01-13', 80.00, 'PROVEEDOR CUATRO'),
+        siat_row(4, '123456', 104, 'AUT0000104', '2025-01-14', 80.00, 'PROVEEDOR CUATRO'),  # fecha distinta
         siat_row(5, '1000000006', 106, 'AUT0000106', '2025-01-14', 40.00, 'PROVEEDOR SEIS'),
         siat_row(6, '1000000007', 107, 'AUT0000X07', '2025-01-15', 320.00, 'PROVEEDOR SIETE'),
         siat_row(7, '1000000007', 107, 'AUT0000Y07', '2025-01-20', 320.00, 'PROVEEDOR SIETE'),

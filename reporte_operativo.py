@@ -1,13 +1,14 @@
 """Reporte operativo compacto para Control Integral de Compras SAP–SIAT.
 
-Capa POSTERIOR a ``run_audit()``: no modifica ``motor_auditoria.py`` ni la
-clasificación de facturas. Lee el Excel que genera el motor y el Excel SAP
-ORIGINAL cargado por el usuario, y produce un Excel de solo tres pestañas:
+Capa POSTERIOR a ``run_audit()``: no modifica ``motor_auditoria.py`` ni el
+emparejamiento. Lee el Excel que genera el motor y el Excel SAP ORIGINAL cargado
+por el usuario, clasifica las diferencias por gravedad (``clasificacion.py``) y
+produce un Excel de solo tres pestañas:
 
-  1. CONTROL GENERAL  (A=ESTADO, B=CAMPOS CON DIFERENCIA, C=USUARIO SAP,
-                       D=N.º ASIENTO SAP, y el detalle SAP/SIAT a corregir)
-  2. POR CONCILIAR    (solo SAP, solo SIAT y candidatos de emparejamiento)
-  3. RESUMEN          (indicadores esenciales)
+  1. CONTROL GENERAL       solo diferencias críticas o de identidad (A=ESTADO,
+                           B=CAMPOS CON DIFERENCIA, C=USUARIO SAP, D=N.º ASIENTO SAP)
+  2. POR CONCILIAR         sin pareja (solo SAP / solo SIAT) y posibles emparejamientos
+  3. DIFERENCIAS MENORES   informativas: razón social con variación formal y redondeos
 
 Usuario y asiento SAP solo se asignan con evidencia verificable: la fila de
 origen del motor (``_FILA_ORIGEN``) debe coincidir en NIT + factura (+ código de
@@ -27,11 +28,15 @@ from typing import Any
 import pandas as pd
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from clasificacion import (
+    CRIT_IDENT, RANGO_ESTADO, REV_IDENTIDAD, TAG_CRITICA, TAG_IDENTIDAD, TAG_MENOR,
+    cargar_equivalencias, clasificar_facturas, tipo_menor,
+)
 from motor_auditoria import (
-    FIELD_LABELS,
     SAP_TO_CANON,
     __author__,
     __project__,
@@ -60,11 +65,12 @@ FUENTE = 'Calibri'
 
 HOJA_CONTROL = 'CONTROL GENERAL'
 HOJA_PENDIENTES = 'POR CONCILIAR'
-HOJA_RESUMEN = 'RESUMEN'
+HOJA_MENORES = 'DIFERENCIAS MENORES'
 HOJAS_MOTOR_REQUERIDAS = (
     'CONTROL GENERAL', 'DETALLE DIFERENCIAS', 'REDONDEOS',
     'SOLO SAP', 'SOLO SIAT', 'BASE SAP NORMALIZADA',
 )
+AMARILLO_PESTANA = 'FFE699'
 
 # Encabezados SAP que el motor ya exige (SAP_TO_CANON): se usan tal cual para
 # NIT, factura y autorización. Solo usuario y asiento se detectan por alias.
@@ -352,8 +358,9 @@ def _vincular_usuario_asiento(
     return meta, d
 
 
+
 # ---------------------------------------------------------------------------
-# Detalle SAP vs SIAT por factura
+# Presentación de valores
 # ---------------------------------------------------------------------------
 def _show(value: Any) -> str:
     if _vacio(value):
@@ -363,25 +370,20 @@ def _show(value: Any) -> str:
     return str(value)
 
 
-def _extract_details(diferencias: list[dict], redondeos: list[dict]) -> dict:
-    """{(fila_sap, fila_siat): 'Campo: SAP x → SIAT y' en líneas separadas}."""
-    out: dict[tuple, list[str]] = defaultdict(list)
-
-    def linea(campo, rec, etiqueta, dif):
-        txt = f"{campo or 'Campo'}{etiqueta}: SAP {_show(rec.get('VALOR SAP'))} → SIAT {_show(rec.get('VALOR SIAT'))}"
-        if not _vacio(dif):
-            txt += f' (dif. {_num(dif):,.2f})'
-        return txt
-
-    for rec in diferencias:
-        par = (_key(rec.get('FILA SAP')), _key(rec.get('FILA SIAT')))
-        if par[0] is not None:
-            out[par].append(linea(rec.get('CAMPO OBSERVADO'), rec, '', rec.get('DIFERENCIA NUMERICA')))
-    for rec in redondeos:
-        par = (_key(rec.get('FILA SAP')), _key(rec.get('FILA SIAT')))
-        if par[0] is not None:
-            out[par].append(linea(rec.get('CAMPO'), rec, ' [redondeo]', rec.get('DIFERENCIA')))
-    return {k: '\n'.join(v) for k, v in out.items()}
+def _valores(item: dict) -> tuple[str, str, str]:
+    """(VALOR EN SAP, VALOR EN SIAT, CLASIFICACIÓN POR CAMPO) alineados línea a línea."""
+    sap, siat, clas = [], [], []
+    for c in item['campos']:
+        etq = f"{c['etiqueta']}"
+        extra = ''
+        if c['tag'] == 'REDONDEO':
+            etq += ' [redondeo]'
+        elif not _vacio(c.get('diferencia')):
+            extra = f" (dif. {_num(c['diferencia']):,.2f})"
+        sap.append(f"{etq}: {_show(c['valor_sap'])}")
+        siat.append(f"{etq}: {_show(c['valor_siat'])}{extra}")
+        clas.append(f"{c['etiqueta']}: {c['tag']}" + (f" · {c['motivo']}" if c['motivo'] else ''))
+    return '\n'.join(sap), '\n'.join(siat), '\n'.join(clas)
 
 
 # ---------------------------------------------------------------------------
@@ -403,8 +405,7 @@ def _put(ws, row: int, col: int, value: Any):
     return cell
 
 
-_LADO = Side(style='thin', color=BORDE)
-_BORDE = Border(bottom=_LADO)
+_BORDE = Border(bottom=Side(style='thin', color=BORDE))
 
 
 def _bg(color: str) -> PatternFill:
@@ -412,23 +413,20 @@ def _bg(color: str) -> PatternFill:
 
 
 def _color_estado(estado: str) -> str:
-    if 'DIFERENCIA' in estado:
+    if estado.startswith('CRÍTICA'):
         return ROJO_SUAVE
-    if 'REDONDEO' in estado:
-        return AMARILLO_SUAVE
-    if estado == 'OK':
-        return VERDE_SUAVE
-    return AZUL_SUAVE
+    if estado == REV_IDENTIDAD:
+        return MAGENTA_SUAVE
+    if estado in ('REVISAR EMPAREJAMIENTO', 'SOLO SAP', 'SOLO SIAT'):
+        return AZUL_SUAVE
+    return AMARILLO_SUAVE  # diferencias menores (informativas)
 
 
-def _tabla(ws, titulos: list[str], filas: list[list], anchos: list[float],
-           dinero: tuple[int, ...] = (), texto: tuple[int, ...] = (),
-           envolver: tuple[int, ...] = ()):
-    """Cabecera + datos + estilos funcionales. Columnas indexadas desde 0."""
+def _tabla(ws, titulos, filas, anchos, color_pestana, dinero=(), texto=(), envolver=()):
+    """Cabecera + datos + estilos funcionales (sin celdas combinadas). Columnas desde 0."""
     ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = MAGENTA if ws.title == HOJA_CONTROL else GRAFITO
+    ws.sheet_properties.tabColor = color_pestana
     ws.row_dimensions[1].height = 34
-
     for i, (titulo, ancho) in enumerate(zip(titulos, anchos), start=1):
         c = ws.cell(1, i, titulo)
         c.fill = _bg(MAGENTA if i == 2 else GRAFITO)
@@ -448,10 +446,23 @@ def _tabla(ws, titulos: list[str], filas: list[list], anchos: list[float],
                 c.alignment = Alignment(vertical='top', horizontal='right')
             elif j in texto:
                 c.number_format = '@'  # identificadores: nunca como número
-
+        # Altura explícita según el texto envuelto (evita solapes y filas cortadas en Excel y LibreOffice).
+        lineas = 1
+        for j in envolver:
+            if j < len(fila) and fila[j]:
+                por_linea = max(8, int(anchos[j] * 0.82))
+                n = sum(max(1, -(-len(t) // por_linea)) for t in str(fila[j]).split('\n'))
+                lineas = max(lineas, n)
+        ws.row_dimensions[r].height = min(409, max(16, 13 * lineas + 4))
         estado = ws.cell(r, 1)
         estado.fill = _bg(_color_estado(str(fila[0] or '')))
         estado.font = Font(name=FUENTE, size=10, bold=True, color=GRAFITO)
+        b = ws.cell(r, 2)  # B: campos a corregir, en magenta
+        b.font = Font(name=FUENTE, size=10, bold=True, color=MAGENTA)
+        b.alignment = Alignment(vertical='top', horizontal='left', wrap_text=True)
+        for col in (3, 4):  # C y D: trazabilidad SAP resaltada
+            ws.cell(r, col).fill = _bg(AMARILLO_SUAVE)
+            ws.cell(r, col).font = Font(name=FUENTE, size=10, bold=True, color=GRAFITO)
 
     ws.freeze_panes = 'E2'
     if filas:
@@ -463,86 +474,96 @@ def _tabla(ws, titulos: list[str], filas: list[list], anchos: list[float],
     ws.print_title_rows = '1:1'
 
 
-def _destacar_trazabilidad(ws, n_filas: int):
-    """B (campos a corregir) en magenta; C y D (usuario/asiento) resaltados."""
-    for r in range(2, n_filas + 2):
-        b = ws.cell(r, 2)
-        b.font = Font(name=FUENTE, size=10, bold=True, color=MAGENTA)
-        b.alignment = Alignment(vertical='top', horizontal='left', wrap_text=True)
-        for col in (3, 4):
-            ws.cell(r, col).fill = _bg(AMARILLO_SUAVE)
-            ws.cell(r, col).font = Font(name=FUENTE, size=10, bold=True, color=GRAFITO)
-
-
-# Campo del motor (etiqueta) -> columnas del reporte a resaltar (índices 0-based)
-def _mapa_campos_control(idx: dict[str, int]) -> dict[str, tuple[int, ...]]:
-    L = FIELD_LABELS
+def _datos_factura(item: dict, auth: dict) -> dict:
+    r = item['registro']
+    nombre_sap, nombre_siat = r.get('RAZON SOCIAL SAP'), r.get('RAZON SOCIAL SIAT')
     return {
-        L['NIT']: (idx['NIT SAP'], idx['NIT SIAT']),
-        L['RAZON_SOCIAL']: (idx['RAZON SOCIAL SAP'], idx['RAZON SOCIAL SIAT']),
-        L['FACTURA']: (idx['FACTURA SAP'], idx['FACTURA SIAT']),
-        L['FECHA']: (idx['FECHA SAP'], idx['FECHA SIAT']),
-        L['IMPORTE_TOTAL']: (idx['IMPORTE SAP (Bs)'], idx['IMPORTE SIAT (Bs)']),
+        'factura': r.get('FACTURA SAP'), 'nit': r.get('NIT SAP'),
+        'razon_sap': nombre_sap,
+        'razon_siat': nombre_siat if nombre_siat != nombre_sap else None,  # solo si difiere
+        'fecha': r.get('FECHA SAP'), 'cuf': auth.get(item['fila_sap']),
+        'imp_sap': r.get('IMPORTE SAP'), 'imp_siat': r.get('IMPORTE SIAT'),
+        'dif': round(_num(r.get('IMPORTE SAP')) - _num(r.get('IMPORTE SIAT')), 2),
     }
 
 
-def _hoja_control(wb, registros: list[dict], detalle: dict, meta: dict) -> int:
+def _hoja_control(wb, items: list[dict], meta: dict, auth: dict) -> int:
     titulos = [
         'ESTADO', 'CAMPOS CON DIFERENCIA', 'USUARIO SAP', 'N.º ASIENTO SAP',
-        'FACTURA SAP', 'FACTURA SIAT', 'NIT SAP', 'NIT SIAT',
-        'DETALLE SAP / SIAT',
-        'RAZON SOCIAL SAP', 'RAZON SOCIAL SIAT', 'FECHA SAP', 'FECHA SIAT',
-        'IMPORTE SAP (Bs)', 'IMPORTE SIAT (Bs)', 'Nº DIFERENCIAS', 'Nº REDONDEOS',
-        'CAMPOS REDONDEO', 'METODO EMPAREJAMIENTO', 'CONFIANZA',
-        'FILA SAP ORIGINAL', 'FILA SIAT ORIGINAL',
+        'N.º FACTURA', 'NIT', 'RAZÓN SOCIAL SAP', 'RAZÓN SOCIAL SIAT', 'FECHA',
+        'CUF / AUTORIZACIÓN', 'IMPORTE SAP (Bs)', 'IMPORTE SIAT (Bs)', 'DIFERENCIA IMPORTE (Bs)',
+        'VALOR EN SAP', 'VALOR EN SIAT', 'CLASIFICACIÓN POR CAMPO',
+        'FILA SAP ORIGINAL', 'FILA SIAT ORIGINAL', 'MÉTODO EMPAREJAMIENTO',
     ]
-    idx = {t: i for i, t in enumerate(titulos)}
-    prioridad = {'DIFERENCIA': 0, 'REVISAR REDONDEO': 1, 'OK': 2}
-    ordenados = sorted(
-        registros,
-        key=lambda r: (prioridad.get(str(r.get('ESTADO')), 3), -_num(r.get('IMPORTE SAP')),
-                       _key(r.get('FILA SAP')) or 0),
-    )
+    en_control = [i for i in items if i['estado']]
+    en_control.sort(key=lambda i: (RANGO_ESTADO[i['estado']], -_num(i['registro'].get('IMPORTE SAP')),
+                                   i['fila_sap'] or 0))
     filas = []
-    for r in ordenados:
-        f_sap, f_siat = _key(r.get('FILA SAP')), _key(r.get('FILA SIAT'))
-        usuario, asiento = meta.get(f_sap, (None, None))
+    for it in en_control:
+        d = _datos_factura(it, auth)
+        usuario, asiento = meta.get(it['fila_sap'], (None, None))
+        v_sap, v_siat, clas = _valores(it)
         filas.append([
-            r.get('ESTADO'), r.get('CAMPOS CON DIFERENCIA') or '', usuario, asiento,
-            r.get('FACTURA SAP'), r.get('FACTURA SIAT'), r.get('NIT SAP'), r.get('NIT SIAT'),
-            detalle.get((f_sap, f_siat), ''),
-            r.get('RAZON SOCIAL SAP'), r.get('RAZON SOCIAL SIAT'),
-            r.get('FECHA SAP'), r.get('FECHA SIAT'),
-            r.get('IMPORTE SAP'), r.get('IMPORTE SIAT'),
-            r.get('Nº DIFERENCIAS'), r.get('Nº REDONDEOS'), r.get('CAMPOS REDONDEO') or '',
-            r.get('METODO EMPAREJAMIENTO'), r.get('CONFIANZA'), f_sap, f_siat,
+            it['estado'], it['registro'].get('CAMPOS CON DIFERENCIA') or '', usuario, asiento,
+            d['factura'], d['nit'], d['razon_sap'], d['razon_siat'], d['fecha'], d['cuf'],
+            d['imp_sap'], d['imp_siat'], d['dif'], v_sap, v_siat, clas,
+            it['fila_sap'], it['fila_siat'], it['registro'].get('METODO EMPAREJAMIENTO'),
         ])
     ws = wb.create_sheet(HOJA_CONTROL)
-    anchos = [19, 30, 18, 20, 16, 16, 15, 15, 62, 36, 36, 13, 13,
-              17, 17, 13, 13, 26, 26, 12, 14, 14]
-    _tabla(ws, titulos, filas, anchos,
-           dinero=(idx['IMPORTE SAP (Bs)'], idx['IMPORTE SIAT (Bs)']),
-           texto=(3, 4, 5, 6, 7), envolver=(1, idx['DETALLE SAP / SIAT'], 17))
-    _destacar_trazabilidad(ws, len(filas))
+    anchos = [27, 30, 17, 19, 14, 14, 36, 36, 12, 24, 16, 16, 16, 46, 46, 50, 12, 12, 26]
+    _tabla(ws, titulos, filas, anchos, MAGENTA, dinero=(10, 11, 12), texto=(3, 4, 5, 9),
+           envolver=(1, 6, 7, 13, 14, 15))
 
-    # Resalta los campos concretos que difieren (rojo) o son redondeo (amarillo).
-    mapa = _mapa_campos_control(idx)
-    for r, fila in enumerate(filas, start=2):
-        for etiqueta, cols in mapa.items():
-            if etiqueta in str(fila[1]).split(' | '):
-                color = ROJO_SUAVE
-            elif etiqueta in str(fila[idx['CAMPOS REDONDEO']]).split(' | '):
-                color = AMARILLO_SUAVE
-            else:
-                continue
-            for c in cols:
-                ws.cell(r, c + 1).fill = _bg(color)
-        if fila[idx['DETALLE SAP / SIAT']]:
-            ws.cell(r, idx['DETALLE SAP / SIAT'] + 1).fill = _bg(MAGENTA_SUAVE)
+    # Resalta los datos concretos con diferencia: rojo = crítica, magenta suave = identidad,
+    # amarillo = menor dentro de una factura que ya requiere revisión.
+    columnas = {'FACTURA': (4,), 'NIT': (5,), 'RAZON_SOCIAL': (6, 7), 'FECHA': (8,),
+                'AUTORIZACION': (9,), 'IMPORTE_TOTAL': (10, 11, 12)}
+    color_tag = {TAG_CRITICA: ROJO_SUAVE, TAG_IDENTIDAD: MAGENTA_SUAVE, TAG_MENOR: AMARILLO_SUAVE}
+    for r, it in enumerate(en_control, start=2):
+        mayor = ROJO_SUAVE if it['estado'].startswith('CRÍTICA') else MAGENTA_SUAVE
+        ws.cell(r, 14).fill = _bg(mayor)
+        ws.cell(r, 15).fill = _bg(mayor)
+        for c in it['campos']:
+            if c['tag'] in color_tag and c['canon'] in columnas:
+                for col in columnas[c['canon']]:
+                    ws.cell(r, col + 1).fill = _bg(color_tag[c['tag']])
+    return len(filas)
+
+
+def _hoja_menores(wb, items: list[dict], meta: dict, auth: dict) -> int:
+    titulos = [
+        'TIPO DE DIFERENCIA', 'CAMPOS CON DIFERENCIA', 'USUARIO SAP', 'N.º ASIENTO SAP',
+        'N.º FACTURA', 'NIT', 'RAZÓN SOCIAL SAP', 'RAZÓN SOCIAL SIAT', 'FECHA',
+        'CUF / AUTORIZACIÓN', 'IMPORTE SAP (Bs)', 'IMPORTE SIAT (Bs)',
+        'VALOR EN SAP', 'VALOR EN SIAT', 'MOTIVO DE CLASIFICACIÓN MENOR',
+        'FILA SAP ORIGINAL', 'FILA SIAT ORIGINAL',
+    ]
+    menores = [i for i in items if i['nivel'] == 'MENOR']
+    menores.sort(key=lambda i: (-_num(i['registro'].get('IMPORTE SAP')), i['fila_sap'] or 0))
+    filas = []
+    for it in menores:
+        d = _datos_factura(it, auth)
+        usuario, asiento = meta.get(it['fila_sap'], (None, None))
+        v_sap, v_siat, _ = _valores(it)
+        filas.append([
+            tipo_menor(it), ' | '.join(str(c['etiqueta']) for c in it['campos']), usuario, asiento,
+            d['factura'], d['nit'], d['razon_sap'], d['razon_siat'], d['fecha'], d['cuf'],
+            d['imp_sap'], d['imp_siat'], v_sap, v_siat, '\n'.join(it['motivos_menor']),
+            it['fila_sap'], it['fila_siat'],
+        ])
+    ws = wb.create_sheet(HOJA_MENORES)
+    anchos = [24, 30, 17, 19, 14, 14, 36, 36, 12, 24, 16, 16, 44, 44, 56, 12, 12]
+    _tabla(ws, titulos, filas, anchos, AMARILLO_PESTANA, dinero=(10, 11), texto=(3, 4, 5, 9),
+           envolver=(1, 6, 7, 12, 13, 14))
+    ws['A1'].comment = Comment(
+        'Diferencias informativas de baja prioridad. Que una fila esté aquí NO significa que el dato '
+        'esté corregido ni aprobado: solo que no requiere revisión prioritaria. Se separaron del '
+        'CONTROL GENERAL porque el NIT, la factura y la autorización coinciden.', 'Control SAP–SIAT')
     return len(filas)
 
 
 def _hoja_pendientes(wb, solo_sap, solo_siat, candidatos, meta) -> int:
+    """Cada hallazgo aparece UNA vez: un candidato absorbe a su fila solo-SAP y solo-SIAT."""
     titulos = [
         'SITUACION', 'MOTIVO / ACCION', 'USUARIO SAP', 'N.º ASIENTO SAP',
         'FACTURA SAP', 'FACTURA SIAT', 'NIT SAP', 'NIT SIAT',
@@ -550,8 +571,8 @@ def _hoja_pendientes(wb, solo_sap, solo_siat, candidatos, meta) -> int:
         'FECHA SAP', 'FECHA SIAT', 'PUNTAJE', 'FILA SAP ORIGINAL', 'FILA SIAT ORIGINAL',
         'EVIDENCIA / OBSERVACION',
     ]
-    sap_con_candidato = {_key(c.get('FILA SAP')) for c in candidatos}
-    siat_con_candidato = {_key(c.get('FILA SIAT CANDIDATA')) for c in candidatos}
+    sap_en_candidato = {_key(c.get('FILA SAP')) for c in candidatos}
+    siat_en_candidato = {_key(c.get('FILA SIAT CANDIDATA')) for c in candidatos}
     filas = []  # (grupo, importe, fila)
     for r in candidatos:
         f_sap = _key(r.get('FILA SAP'))
@@ -560,7 +581,9 @@ def _hoja_pendientes(wb, solo_sap, solo_siat, candidatos, meta) -> int:
         if not _vacio(r.get('MARGEN VS 2DO')):
             evidencia += f" | margen vs 2.º candidato: {r.get('MARGEN VS 2DO')}"
         filas.append((0, _num(r.get('IMPORTE SAP')), [
-            'REVISAR EMPAREJAMIENTO', 'Posible cruce, NO aceptado: validar contra la factura física',
+            'REVISAR EMPAREJAMIENTO',
+            'Posible cruce, NO aceptado: validar contra la factura física. Si no corresponde, ambas '
+            'facturas quedan sin pareja.',
             usuario, asiento, r.get('FACTURA SAP'), r.get('FACTURA SIAT CANDIDATA'),
             r.get('NIT SAP'), r.get('NIT SIAT CANDIDATO'),
             r.get('PROVEEDOR SAP'), r.get('PROVEEDOR SIAT CANDIDATO'),
@@ -569,112 +592,58 @@ def _hoja_pendientes(wb, solo_sap, solo_siat, candidatos, meta) -> int:
             f_sap, _key(r.get('FILA SIAT CANDIDATA')), evidencia]))
     for r in solo_sap:
         f_sap = _key(r.get('_FILA_ORIGEN'))
+        if f_sap in sap_en_candidato:
+            continue
         usuario, asiento = meta.get(f_sap, (None, None))
-        nota = ('Tiene un posible cruce en SIAT: ver REVISAR EMPAREJAMIENTO'
-                if f_sap in sap_con_candidato else 'Verificar el registro SAP y su documentación de respaldo')
         filas.append((1, _num(r.get('IMPORTE_TOTAL')), [
             'SOLO SAP', 'Sin correspondencia en SIAT', usuario, asiento,
             r.get('FACTURA'), None, r.get('NIT'), None, r.get('RAZON_SOCIAL'), None,
-            r.get('IMPORTE_TOTAL'), None, r.get('FECHA'), None, None, f_sap, None, nota]))
+            r.get('IMPORTE_TOTAL'), None, r.get('FECHA'), None, None, f_sap, None,
+            'Verificar el registro SAP y su documentación de respaldo']))
     for r in solo_siat:
         f_siat = _key(r.get('_FILA_ORIGEN'))
-        nota = ('Tiene un posible cruce en SAP: ver REVISAR EMPAREJAMIENTO'
-                if f_siat in siat_con_candidato else 'Revisar si corresponde registrar la factura en SAP')
+        if f_siat in siat_en_candidato:
+            continue
         filas.append((2, _num(r.get('IMPORTE_TOTAL')), [
             'SOLO SIAT', 'Sin correspondencia en SAP', None, None,
             None, r.get('FACTURA'), None, r.get('NIT'), None, r.get('RAZON_SOCIAL'),
-            None, r.get('IMPORTE_TOTAL'), None, r.get('FECHA'), None, None, f_siat, nota]))
+            None, r.get('IMPORTE_TOTAL'), None, r.get('FECHA'), None, None, f_siat,
+            'Revisar si corresponde registrar la factura en SAP']))
     filas.sort(key=lambda x: (x[0], -x[1]))
     datos = [f[2] for f in filas]
-
     ws = wb.create_sheet(HOJA_PENDIENTES)
-    anchos = [24, 40, 18, 20, 16, 16, 15, 15, 34, 34, 17, 17, 13, 13, 10, 14, 14, 60]
-    _tabla(ws, titulos, datos, anchos, dinero=(10, 11), texto=(3, 4, 5, 6, 7),
+    anchos = [24, 40, 17, 19, 14, 14, 14, 14, 34, 34, 16, 16, 12, 12, 9, 12, 12, 56]
+    _tabla(ws, titulos, datos, anchos, GRAFITO, dinero=(10, 11), texto=(3, 4, 5, 6, 7),
            envolver=(1, 17))
-    _destacar_trazabilidad(ws, len(datos))
     return len(datos)
 
 
-def _hoja_resumen(wb, control, solo_sap, solo_siat, candidatos, diag: dict, round_tol: float | None = None):
-    ws = wb.create_sheet(HOJA_RESUMEN)
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.tabColor = GRIS
-    ws.column_dimensions['A'].width = 46
-    ws.column_dimensions['B'].width = 14
-    ws.column_dimensions['C'].width = 52
-
-    ws.merge_cells('A1:C1')
-    t = ws['A1']
-    t.value = 'CONTROL OPERATIVO DE COMPRAS | SAP–SIAT'
-    t.fill = _bg(GRAFITO)
-    t.font = Font(name=FUENTE, size=16, bold=True, color=BLANCO)
-    t.alignment = Alignment(vertical='center', indent=1)
-    ws.row_dimensions[1].height = 32
-
-    cuenta = Counter(str(r.get('ESTADO') or '') for r in control)
-    total_sap = diag.get('total_sap') or (len(control) + len(solo_sap))
-
-    def cobertura(n: int) -> str:
-        if not total_sap:
-            return ''
-        return f'{n / total_sap:.1%} de {total_sap:,} registros SAP'
-
-    indicadores = [
-        ('Facturas emparejadas', len(control), ''),
-        ('Facturas sin diferencias', cuenta.get('OK', 0), ''),
-        ('Facturas con diferencias', cuenta.get('DIFERENCIA', 0), 'Filtrar ESTADO = DIFERENCIA en CONTROL GENERAL'),
-        ('Redondeos', cuenta.get('REVISAR REDONDEO', 0), ''),
-        ('Registros solo SAP', len(solo_sap), 'Ver POR CONCILIAR'),
-        ('Registros solo SIAT', len(solo_siat), 'Ver POR CONCILIAR'),
-        ('Candidatos pendientes de revisión', len(candidatos), 'Posibles cruces NO aceptados automáticamente'),
-        ('Usuario SAP recuperado', diag.get('filas_con_usuario', 0), cobertura(diag.get('filas_con_usuario', 0))),
-        ('Asiento SAP recuperado', diag.get('filas_con_asiento', 0), cobertura(diag.get('filas_con_asiento', 0))),
-    ]
-    for i, titulo in enumerate(('INDICADOR', 'CANTIDAD', 'NOTA'), start=1):
-        c = ws.cell(3, i, titulo)
-        c.fill = _bg(MAGENTA)
-        c.font = Font(name=FUENTE, size=11, bold=True, color=BLANCO)
-        c.alignment = Alignment(vertical='center', horizontal='center' if i == 2 else 'left')
-    ws.row_dimensions[3].height = 24
-    for r, (nombre, cantidad, nota) in enumerate(indicadores, start=4):
-        for j, v in enumerate((nombre, cantidad, nota), start=1):
-            c = _put(ws, r, j, v)
-            c.font = Font(name=FUENTE, size=11, bold=(j == 2), color=TEXTO if j != 3 else GRIS)
-            c.fill = _bg(FONDO if r % 2 else BLANCO)
-            c.border = _BORDE
-            c.alignment = Alignment(vertical='center', horizontal='right' if j == 2 else 'left')
-        ws.cell(r, 2).number_format = '#,##0'
-        ws.row_dimensions[r].height = 22
-
-    fila = 4 + len(indicadores) + 1
-    ws.cell(fila, 1, 'GUÍA DE USO').font = Font(name=FUENTE, size=11, bold=True, color=MAGENTA)
-    guia = [
-        '1. CONTROL GENERAL: filtre ESTADO = DIFERENCIA. La columna B indica qué campos corregir y DETALLE SAP / SIAT muestra ambos valores.',
-        '2. Las columnas C y D ubican el usuario y el asiento SAP. Si están vacías, no hubo evidencia verificable en el archivo SAP original.',
-        '3. POR CONCILIAR: registros sin pareja y posibles cruces. Ningún cruce ambiguo se acepta automáticamente.',
-        '4. Este reporte NO corrige SAP: el cambio lo realiza el personal autorizado tras validar la factura original.',
-    ]
-    for k, texto in enumerate(guia, start=fila + 1):
-        ws.merge_cells(start_row=k, start_column=1, end_row=k, end_column=3)
-        c = ws.cell(k, 1, texto)
-        c.font = Font(name=FUENTE, size=10, color=TEXTO)
-        c.alignment = Alignment(wrap_text=True, vertical='center')
-        ws.row_dimensions[k].height = 30
-
-    fila = fila + len(guia) + 2
-    avisos = list(diag.get('advertencias', []))
-    if avisos:
-        ws.cell(fila, 1, 'ADVERTENCIAS').font = Font(name=FUENTE, size=11, bold=True, color=MAGENTA)
-        for k, texto in enumerate(avisos, start=fila + 1):
-            ws.merge_cells(start_row=k, start_column=1, end_row=k, end_column=3)
-            c = _put(ws, k, 1, texto)
-            c.font = Font(name=FUENTE, size=10, color=TEXTO)
-            c.alignment = Alignment(wrap_text=True, vertical='top')
-            c.fill = _bg(AMARILLO_SUAVE)
-            ws.row_dimensions[k].height = 44 if len(texto) > 120 else 30
-    ws.page_setup.orientation = 'portrait'
-    ws.sheet_properties.pageSetUpPr.fitToPage = True
-    ws.page_setup.fitToWidth = 1
+# ---------------------------------------------------------------------------
+# Indicadores (para Streamlit; el Excel no lleva hoja de resumen)
+# ---------------------------------------------------------------------------
+def _indicadores(items, control, solo_sap, solo_siat, candidatos, diag) -> dict:
+    n = Counter(i['nivel'] for i in items)
+    estados = Counter(i['estado'] for i in items if i['estado'])
+    menores = [i for i in items if i['nivel'] == 'MENOR']
+    n_nominal = sum(1 for i in menores if any(c['tag'] == TAG_MENOR for c in i['campos']))
+    n_red = sum(1 for i in menores if not any(c['tag'] == TAG_MENOR for c in i['campos']))
+    return {
+        'emparejadas': len(control),
+        'sin_diferencias': n.get('OK', 0),
+        'criticas': n.get('CRITICA', 0),
+        'criticas_identificador': estados.get(CRIT_IDENT, 0),
+        'revision_identidad': n.get('IDENTIDAD', 0),
+        'menores_nominales': n_nominal,       # razón social con variación formal (con o sin redondeo)
+        'solo_redondeo': n_red,               # solo redondeo dentro de tolerancia
+        'en_control_general': n.get('CRITICA', 0) + n.get('IDENTIDAD', 0),
+        'en_menores': len(menores),
+        'solo_sap': len(solo_sap),
+        'solo_siat': len(solo_siat),
+        'candidatos': len(candidatos),
+        'total_sap': diag.get('total_sap', 0),
+        'cobertura_usuario': diag.get('filas_con_usuario', 0),
+        'cobertura_asiento': diag.get('filas_con_asiento', 0),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -686,13 +655,17 @@ def generar_reporte_operativo(
     reporte_salida: str | Path,
     columna_usuario: str | None = None,
     columna_asiento: str | None = None,
+    tolerancia: float | None = None,
+    equivalencias_path: str | Path | None = None,
 ) -> dict:
-    """Genera el Excel compacto de 3 hojas y devuelve el diagnóstico de trazabilidad.
+    """Genera el Excel compacto de 3 hojas y devuelve el diagnóstico (incluye ``indicadores``).
 
     ``reporte_original``: Excel producido por ``run_audit()`` (no se modifica).
     ``sap_original``: Excel SAP cargado por el usuario (fuente de usuario/asiento).
-    ``columna_usuario`` / ``columna_asiento``: nombre exacto de encabezado para
-    forzar la columna cuando la detección automática no reconoce la exportación.
+    ``columna_usuario`` / ``columna_asiento``: encabezado exacto para forzar la columna cuando la
+    detección automática no reconoce la exportación.
+    ``tolerancia``: tolerancia de redondeo usada en la auditoría (solo se cita en los motivos).
+    ``equivalencias_path``: JSON de equivalencias de nombre verificadas (por NIT).
     """
     reporte_original, sap_original, reporte_salida = (
         Path(reporte_original), Path(sap_original), Path(reporte_salida)
@@ -716,7 +689,9 @@ def generar_reporte_operativo(
         raw.close()
 
     meta, diag = _vincular_usuario_asiento(sap_original, base_sap, columna_usuario, columna_asiento)
-    detalle = _extract_details(diferencias, redondeos)
+    auth = {_key(r.get('_FILA_ORIGEN')): r.get('AUTORIZACION') for r in base_sap}
+    items = clasificar_facturas(control, diferencias, redondeos,
+                                cargar_equivalencias(equivalencias_path), tolerancia)
     if reparaciones:
         lineas = ', '.join(str(r.get('LINEAS FISICAS')) for r in reparaciones[:15])
         mas = f' y {len(reparaciones) - 15} más' if len(reparaciones) > 15 else ''
@@ -726,13 +701,20 @@ def generar_reporte_operativo(
 
     out = Workbook()
     out.remove(out.active)
-    n_control = _hoja_control(out, control, detalle, meta)
+    n_control = _hoja_control(out, items, meta, auth)
     n_pend = _hoja_pendientes(out, solo_sap, solo_siat, candidatos, meta)
-    _hoja_resumen(out, control, solo_sap, solo_siat, candidatos, diag)
+    n_menores = _hoja_menores(out, items, meta, auth)
 
-    # Control de integridad: ninguna factura se pierde en la capa de reporte.
-    esperado_pend = len(solo_sap) + len(solo_siat) + len(candidatos)
-    if n_control != len(control) or n_pend != esperado_pend:
+    # Control de integridad: ninguna factura emparejada ni sin pareja se pierde en la capa de reporte.
+    ind = _indicadores(items, control, solo_sap, solo_siat, candidatos, diag)
+    suma = (ind['sin_diferencias'] + ind['criticas'] + ind['revision_identidad']
+            + ind['menores_nominales'] + ind['solo_redondeo'])
+    esperado_pend = len(candidatos) + len(solo_sap) + len(solo_siat) - (
+        len({_key(c.get('FILA SAP')) for c in candidatos} & {_key(r.get('_FILA_ORIGEN')) for r in solo_sap})
+        + len({_key(c.get('FILA SIAT CANDIDATA')) for c in candidatos}
+              & {_key(r.get('_FILA_ORIGEN')) for r in solo_siat}))
+    if (suma != len(control) or n_control != ind['en_control_general'] or n_menores != ind['en_menores']
+            or n_pend != esperado_pend):
         raise RuntimeError('El reporte compacto no conserva todos los registros del motor.')
 
     out.properties.creator = __author__
@@ -742,7 +724,8 @@ def generar_reporte_operativo(
     out.save(reporte_salida)
     out.close()
 
+    diag['indicadores'] = ind
     diag['nombre_archivo'] = reporte_salida.name
-    diag['total_conciliadas'] = n_control
+    diag['total_conciliadas'] = len(control)
     diag['total_pendientes'] = n_pend
     return diag

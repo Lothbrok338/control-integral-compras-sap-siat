@@ -602,6 +602,7 @@ if run:
                 reporte_original=out_path,
                 sap_original=sap_path,
                 reporte_salida=operativo_path,
+                tolerancia=float(round_tol),
             )
             result_bytes = operativo_path.read_bytes()
 
@@ -626,6 +627,9 @@ if run:
 if st.session_state.get("metrics"):
     m = st.session_state["metrics"]
 
+    diag = st.session_state.get("metadata_diagnostico") or {}
+    ind = diag.get("indicadores") or {}
+
     st.markdown('<div class="uv-section-title">Resumen de auditoría</div>', unsafe_allow_html=True)
 
     a, b, c, d = st.columns(4, gap="medium")
@@ -634,13 +638,44 @@ if st.session_state.get("metrics"):
     c.metric("Emparejadas", _format_count(m["matched"]))
     d.metric("Sin diferencias", _format_count(m["ok"]))
 
-    a, b, c, d = st.columns(4, gap="medium")
-    a.metric("Con diferencias", _format_count(m["diff"]))
-    b.metric("Revisar redondeo", _format_count(m["rounding"]))
-    c.metric("Solo SAP", _format_count(m["solo_sap"]))
-    d.metric("Solo SIAT", _format_count(m["solo_siat"]))
+    if ind:
+        st.markdown("**Para revisar en SAP** · hoja CONTROL GENERAL y POR CONCILIAR")
+        a, b, c, d = st.columns(4, gap="medium")
+        a.metric("Diferencias críticas", _format_count(ind["criticas"]),
+                 help="NIT, factura, autorización, importes fuera de tolerancia, tipo de compra o fecha.")
+        b.metric("Revisión de identidad", _format_count(ind["revision_identidad"]),
+                 help="Razón social no equivalente o equivalencia no verificable, con NIT coincidente.")
+        c.metric("Sin correspondencia", _format_count(ind["solo_sap"] + ind["solo_siat"]),
+                 help=f"Solo SAP: {ind['solo_sap']} · Solo SIAT: {ind['solo_siat']}.")
+        d.metric("Posibles emparejamientos", _format_count(ind["candidatos"]),
+                 help="Candidatos que requieren validación manual; no se aceptan automáticamente.")
 
-    diag = st.session_state.get("metadata_diagnostico") or {}
+        st.markdown("**Informativas** · hoja DIFERENCIAS MENORES (baja prioridad)")
+        a, b, c, d = st.columns(4, gap="medium")
+        a.metric("Nominales menores", _format_count(ind["menores_nominales"]),
+                 help="Razón social con variación solo formal (puntuación, orden, ortografía leve) y NIT coincidente.")
+        b.metric("Solo redondeo", _format_count(ind["solo_redondeo"]),
+                 help="Diferencias dentro de la tolerancia, sin otras observaciones.")
+        with st.expander("¿Cómo se agruparon las cifras del motor?"):
+            st.markdown(
+                f"El motor original detectó **{_format_count(m['diff'])} facturas con diferencias** y "
+                f"**{_format_count(m['rounding'])} con redondeo**. Se mantienen sin cambios en la auditoría; "
+                "para el reporte se reagruparon así:\n\n"
+                f"- **{_format_count(ind['criticas'])} críticas** y **{_format_count(ind['revision_identidad'])} de "
+                "revisión de identidad** → CONTROL GENERAL.\n"
+                f"- **{_format_count(ind['menores_nominales'])} nominales menores** y "
+                f"**{_format_count(ind['solo_redondeo'])} solo redondeo** → DIFERENCIAS MENORES.\n"
+                f"- **{_format_count(ind['sin_diferencias'])} sin diferencias** no aparecen en el Excel.\n\n"
+                "Una diferencia menor nunca oculta una crítica: si la factura tiene cualquier diferencia "
+                "crítica o de identidad, permanece completa en CONTROL GENERAL."
+            )
+    else:
+        a, b, c, d = st.columns(4, gap="medium")
+        a.metric("Con diferencias", _format_count(m["diff"]))
+        b.metric("Revisar redondeo", _format_count(m["rounding"]))
+        c.metric("Solo SAP", _format_count(m["solo_sap"]))
+        d.metric("Solo SIAT", _format_count(m["solo_siat"]))
+
     if diag:
         st.caption(
             f"Trazabilidad SAP: usuario recuperado en {diag.get('filas_con_usuario', 0)} y asiento en "
@@ -691,7 +726,7 @@ if st.session_state.get("result_bytes"):
     )
 
     st.caption(
-        "Excel operativo con solo tres pestañas: CONTROL GENERAL, POR CONCILIAR y RESUMEN. "
+        "Excel operativo con tres pestañas: CONTROL GENERAL (revisión prioritaria), POR CONCILIAR y DIFERENCIAS MENORES (informativa). "
         "Incluye usuario SAP y asiento cuando se verifican contra el archivo original."
     )
 

@@ -28,3 +28,13 @@ La autoría técnica se conserva como metadato del motor y también en las propi
 - **DIFERENCIAS MENORES** (informativa, pestaña amarilla): razón social con variación solo formal (puntuación, tildes, orden de nombres, abreviaturas estándar, ortografía leve, nombre ampliado/abreviado al final como sigla o apellido omitido, palabras intermedias omitidas) con NIT, factura y autorización coincidentes, y redondeos dentro de la tolerancia sin otras discrepancias.
 - Una diferencia menor **nunca** oculta una crítica. La similitud textual no aprueba nada por sí sola. Siglas y nombres comerciales solo se aceptan si están en `equivalencias_verificadas.json` para ese NIT.
 - Las facturas sin diferencias no se exportan, pero se cuentan en los indicadores de la app.
+
+## Equivalencias de nombre verificadas
+- `equivalencias_verificadas.json`: pares de nombres que el personal verificó como el mismo contribuyente, **ligados a un NIT**. Este repositorio es **público**: aquí solo van empresas e instituciones.
+- NIT de **personas naturales** u otros datos sensibles: guárdalos en Streamlit Cloud → *Settings → Secrets* con la clave `EQUIVALENCIAS_VERIFICADAS` (texto JSON con el mismo formato). Se suman al archivo del repositorio; si el secreto no existe o es inválido, se ignora.
+
+```toml
+EQUIVALENCIAS_VERIFICADAS = '''
+{"equivalencias": [{"nit": "NIT_SIN_CEROS", "nombres": ["NOMBRE EN SAP", "NOMBRE EN SIAT"], "nota": "verificada por ..."}]}
+'''
+```

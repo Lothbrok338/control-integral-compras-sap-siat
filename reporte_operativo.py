@@ -657,6 +657,7 @@ def generar_reporte_operativo(
     columna_asiento: str | None = None,
     tolerancia: float | None = None,
     equivalencias_path: str | Path | None = None,
+    equivalencias_extra: Any = None,
 ) -> dict:
     """Genera el Excel compacto de 3 hojas y devuelve el diagnóstico (incluye ``indicadores``).
 
@@ -666,6 +667,7 @@ def generar_reporte_operativo(
     detección automática no reconoce la exportación.
     ``tolerancia``: tolerancia de redondeo usada en la auditoría (solo se cita en los motivos).
     ``equivalencias_path``: JSON de equivalencias de nombre verificadas (por NIT).
+    ``equivalencias_extra``: equivalencias privadas adicionales (p. ej. secreto de Streamlit).
     """
     reporte_original, sap_original, reporte_salida = (
         Path(reporte_original), Path(sap_original), Path(reporte_salida)
@@ -691,7 +693,7 @@ def generar_reporte_operativo(
     meta, diag = _vincular_usuario_asiento(sap_original, base_sap, columna_usuario, columna_asiento)
     auth = {_key(r.get('_FILA_ORIGEN')): r.get('AUTORIZACION') for r in base_sap}
     items = clasificar_facturas(control, diferencias, redondeos,
-                                cargar_equivalencias(equivalencias_path), tolerancia)
+                                cargar_equivalencias(equivalencias_path, equivalencias_extra), tolerancia)
     if reparaciones:
         lineas = ', '.join(str(r.get('LINEAS FISICAS')) for r in reparaciones[:15])
         mas = f' y {len(reparaciones) - 15} más' if len(reparaciones) > 15 else ''

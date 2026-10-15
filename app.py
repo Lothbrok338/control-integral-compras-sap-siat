@@ -399,6 +399,20 @@ def _format_count(value) -> str:
         return str(value)
 
 
+def _equivalencias_privadas():
+    """Equivalencias de nombre verificadas guardadas como secreto (no van al repositorio público)."""
+    try:
+        valor = st.secrets.get("EQUIVALENCIAS_VERIFICADAS")
+    except Exception:
+        return None
+    if valor is None:
+        return None
+    try:
+        return valor if isinstance(valor, str) else dict(valor)
+    except Exception:
+        return None
+
+
 def _format_size(num_bytes: int) -> str:
     if num_bytes < 1024:
         return f"{num_bytes} B"
@@ -603,6 +617,7 @@ if run:
                 sap_original=sap_path,
                 reporte_salida=operativo_path,
                 tolerancia=float(round_tol),
+                equivalencias_extra=_equivalencias_privadas(),
             )
             result_bytes = operativo_path.read_bytes()
 

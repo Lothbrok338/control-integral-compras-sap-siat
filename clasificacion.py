@@ -23,6 +23,7 @@ en revisión manual, nunca se aprueba automáticamente.
 from __future__ import annotations
 
 import json
+import os
 import re
 import unicodedata
 from collections import defaultdict
@@ -135,18 +136,38 @@ def _distancia(a: str, b: str) -> int:
     return d[n][m]
 
 
-def cargar_equivalencias(ruta: str | Path | None = None) -> list[dict]:
+def _entradas_validas(datos: Any) -> list[dict]:
+    if isinstance(datos, dict):
+        datos = datos.get('equivalencias', [])
+    if not isinstance(datos, list):
+        return []
+    return [e for e in datos if isinstance(e, dict) and e.get('nit') and len(e.get('nombres') or []) >= 2]
+
+
+def cargar_equivalencias(ruta: str | Path | None = None, extra: Any = None) -> list[dict]:
     """Equivalencias de nombres VERIFICADAS manualmente, ligadas a un NIT concreto.
 
-    Formato del JSON: {"equivalencias": [{"nit": "123", "nombres": ["A", "B"], "nota": "..."}]}
-    Si el archivo no existe o es inválido se devuelve una lista vacía (no se aprueba nada).
+    Fuentes (se suman): 1) ``equivalencias_verificadas.json`` del repositorio (solo empresas e
+    instituciones: el repositorio es público); 2) ``extra``: lista/dict/JSON con el mismo formato,
+    p. ej. el secreto privado ``EQUIVALENCIAS_VERIFICADAS`` de Streamlit (NIT de personas naturales);
+    3) la variable de entorno ``EQUIVALENCIAS_VERIFICADAS`` (Streamlit expone los secretos así).
+    Formato: {"equivalencias": [{"nit": "123", "nombres": ["A", "B"], "nota": "..."}]}.
+    Cualquier fuente ausente o inválida se ignora (no se aprueba nada de más).
     """
+    fuentes: list[Any] = []
     ruta = Path(ruta) if ruta else Path(__file__).with_name('equivalencias_verificadas.json')
     try:
-        datos = json.loads(ruta.read_text(encoding='utf-8'))
-        return [e for e in datos.get('equivalencias', []) if e.get('nit') and e.get('nombres')]
+        fuentes.append(json.loads(ruta.read_text(encoding='utf-8')))
     except Exception:
-        return []
+        pass
+    for crudo in (extra, os.environ.get('EQUIVALENCIAS_VERIFICADAS')):
+        if crudo in (None, ''):
+            continue
+        try:
+            fuentes.append(json.loads(crudo) if isinstance(crudo, (str, bytes)) else crudo)
+        except Exception:
+            pass
+    return [e for f in fuentes for e in _entradas_validas(f)]
 
 
 def clasificar_razon_social(sap: Any, siat: Any, nit: str = '',
@@ -166,9 +187,9 @@ def clasificar_razon_social(sap: Any, siat: Any, nit: str = '',
     cb = [t for t in tb if t not in FORMAS_JURIDICAS and t not in CONECTORES]
 
     # Equivalencia verificada manualmente para este NIT (la única vía para siglas/nombres comerciales)
-    pares = {' '.join(ta), ' '.join(tb)}
+    pares = {' '.join(sorted(ta)), ' '.join(sorted(tb))}   # sin depender del orden de las palabras
     for eq in equivalencias or []:
-        if str(eq.get('nit')) == str(nit) and pares <= {' '.join(normalizar_nombre(n)) for n in eq['nombres']}:
+        if str(eq.get('nit')) == str(nit) and pares <= {' '.join(sorted(normalizar_nombre(n))) for n in eq['nombres']}:
             return 'MENOR', 'Equivalencia de nombre verificada para este NIT'
 
     def _descripcion_legal() -> str:

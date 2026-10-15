@@ -63,6 +63,8 @@ def test_equivalencia_verificada_solo_aplica_a_su_nit(tmp_path):
     assert cl.clasificar_razon_social('SIGLA PRUEBA', 'SOCIEDAD DE PRUEBA INTEGRAL', '555', eq)[0] == 'MENOR'
     assert cl.clasificar_razon_social('SIGLA PRUEBA', 'SOCIEDAD DE PRUEBA INTEGRAL', '999', eq)[0] == 'REVISION'
     assert cl.clasificar_razon_social('SIGLA PRUEBA', 'OTRA SOCIEDAD', '555', eq)[0] == 'REVISION'
+    # el orden de las palabras en el nombre no impide reconocer la equivalencia verificada
+    assert cl.clasificar_razon_social('PRUEBA SIGLA', 'DE PRUEBA INTEGRAL SOCIEDAD', '555', eq)[0] == 'MENOR'
     ruta = tmp_path / 'eq.json'
     ruta.write_text(json.dumps({'equivalencias': eq}), encoding='utf-8')
     assert cl.cargar_equivalencias(ruta) == eq
@@ -71,8 +73,27 @@ def test_equivalencia_verificada_solo_aplica_a_su_nit(tmp_path):
     assert cl.cargar_equivalencias(ruta) == []
 
 
-def test_archivo_de_equivalencias_del_repositorio_no_trae_nada_inventado():
-    assert cl.cargar_equivalencias() == []
+def test_archivo_de_equivalencias_del_repositorio_tiene_estructura_valida():
+    eqs = cl.cargar_equivalencias()
+    assert eqs and all(str(e['nit']).isdigit() and len(e['nombres']) >= 2 and e.get('nota') for e in eqs)
+    # equivalencias ligadas a su NIT: un nombre equivalente en otro NIT NO se aprueba
+    e = eqs[0]
+    a, b = e['nombres'][:2]
+    assert cl.clasificar_razon_social(a, b, e['nit'], eqs)[0] == 'MENOR'
+    assert cl.clasificar_razon_social(a, b, '0000001', eqs)[0] == 'REVISION'
+
+
+def test_equivalencias_privadas_se_suman_desde_extra_y_entorno(tmp_path, monkeypatch):
+    base = len(cl.cargar_equivalencias())
+    priv = {'equivalencias': [{'nit': '777', 'nombres': ['PERSONA UNO SIGLA', 'COMERCIO DE PERSONA UNO'], 'nota': 'x'}]}
+    assert len(cl.cargar_equivalencias(extra=json.dumps(priv))) == base + 1
+    assert len(cl.cargar_equivalencias(extra=priv)) == base + 1
+    monkeypatch.setenv('EQUIVALENCIAS_VERIFICADAS', json.dumps(priv))
+    eqs = cl.cargar_equivalencias()
+    assert len(eqs) == base + 1
+    assert cl.clasificar_razon_social('PERSONA UNO SIGLA', 'COMERCIO DE PERSONA UNO', '777', eqs)[0] == 'MENOR'
+    monkeypatch.setenv('EQUIVALENCIAS_VERIFICADAS', 'no es json')
+    assert len(cl.cargar_equivalencias()) == base                 # secreto inválido: se ignora
 
 
 # --------------------------------------------- integración con el motor real

@@ -1,4 +1,77 @@
 {
-  "_instrucciones": "Equivalencias de razón social VERIFICADAS manualmente y ligadas a un NIT concreto. Solo así una sigla o nombre comercial (ej. sigla vs nombre completo) se clasifica como diferencia menor. Formato de cada entrada: {\"nit\": \"1234567\", \"nombres\": [\"NOMBRE EN SAP\", \"NOMBRE EN SIAT\"], \"nota\": \"quién/cómo se verificó\"}. El NIT se escribe sin ceros a la izquierda (igual que lo normaliza el motor).",
-  "equivalencias": []
+  "_instrucciones": "Equivalencias de razón social VERIFICADAS manualmente y ligadas a un NIT concreto. Solo así una sigla o nombre comercial se clasifica como diferencia menor. Formato: {\"nit\": \"1234567\", \"nombres\": [\"NOMBRE EN SAP\", \"NOMBRE EN SIAT\"], \"nota\": \"quién/cómo se verificó\"}. El NIT va sin ceros a la izquierda. Este repositorio es PÚBLICO: aquí solo van empresas e instituciones; los NIT de PERSONAS NATURALES se cargan en el secreto privado EQUIVALENCIAS_VERIFICADAS de Streamlit (ver README).",
+  "equivalencias": [
+    {
+      "nit": "1020269020",
+      "nombres": [
+        "Y.P.F.B.",
+        "YACIMIENTOS PETROLIFEROS FISCALES BOLIVIANOS"
+      ],
+      "nota": "Equivalencia indicada y verificada por el usuario (sep-2026), ligada a este NIT"
+    },
+    {
+      "nit": "1023213028",
+      "nombres": [
+        "ELFEC",
+        "EMPRESA DE LUZ Y FUERZA ELECTRICA COCHABAMBA S.A."
+      ],
+      "nota": "Equivalencia indicada y verificada por el usuario (sep-2026), ligada a este NIT"
+    },
+    {
+      "nit": "123737022",
+      "nombres": [
+        "PROMOTORA P/LA INVERSI.Y LA CULTURA SA.",
+        "PROMOTORA PARA LA INVERSION Y LA CULTURA S.A."
+      ],
+      "nota": "Equivalencia indicada y verificada por el usuario (sep-2026), ligada a este NIT"
+    },
+    {
+      "nit": "1020115028",
+      "nombres": [
+        "EPSAS S.A.",
+        "EMPRESA PÚBLICA SOCIAL DE AGUA Y SANEAMIENTO"
+      ],
+      "nota": "Equivalencia indicada y verificada por el usuario (sep-2026), ligada a este NIT"
+    },
+    {
+      "nit": "1021375024",
+      "nombres": [
+        "EMPRESA MUNICIPAL DE SERVICIO DE ASEO E.M.S.A.",
+        "EMPRESA MUNICIPAL DE SERVICIOS DE ASEO"
+      ],
+      "nota": "Equivalencia indicada y verificada por el usuario (sep-2026), ligada a este NIT"
+    },
+    {
+      "nit": "198088021",
+      "nombres": [
+        "LINEA AEREA ECOJET S.A.",
+        "LINEA AEREA ECOJET"
+      ],
+      "nota": "Equivalencia indicada y verificada por el usuario (sep-2026), ligada a este NIT"
+    },
+    {
+      "nit": "381978026",
+      "nombres": [
+        "DISPLAS PRODUCCIONES S.R.L.",
+        "DISPLAS SRL"
+      ],
+      "nota": "Equivalencia indicada y verificada por el usuario (sep-2026), ligada a este NIT"
+    },
+    {
+      "nit": "137615027",
+      "nombres": [
+        "FEDERACIÓN DE PROFESIONALES DE COCHABAMB CASA MATRIZ",
+        "FEDERACION DE PROFESIONALES DE COCHABAMBA"
+      ],
+      "nota": "Equivalencia indicada y verificada por el usuario (sep-2026), ligada a este NIT"
+    },
+    {
+      "nit": "1023091020",
+      "nombres": [
+        "UNIVALLE S.A.",
+        "UNIVERSIDAD PRIVADA DEL VALLE S.A."
+      ],
+      "nota": "Equivalencia indicada y verificada por el usuario (sep-2026), ligada a este NIT"
+    }
+  ]
 }

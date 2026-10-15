@@ -197,12 +197,33 @@ def clasificar_razon_social(sap: Any, siat: Any, nit: str = '',
                             motivo = f'Variación ortográfica leve ({p} → {q})'
                             break
 
+    # Nombre ampliado o abreviado AL FINAL: un nombre es el comienzo exacto del otro (p. ej. se agregó
+    # una sigla o nombre comercial, o se omitieron apellidos/palabras finales). Con NIT, factura y
+    # autorización coincidentes se considera menor y se ignora la forma societaria repetida (SRL / R.L.).
+    # Si la parte extra va ANTEPUESTA (nombre comercial delante) sigue en revisión.
+    if motivo is None:
+        corto, largo = (ca, cb) if len(ca) <= len(cb) else (cb, ca)
+        if len(corto) >= 2 and len(corto) < len(largo) and largo[:len(corto)] == corto:
+            extra_txt = ' '.join(largo[len(corto):])
+            return 'MENOR', (f'Nombre ampliado o abreviado al final (un nombre contiene al otro; '
+                             f'difiere: «{extra_txt}»)')
+
+    # Palabras intermedias omitidas (p. ej. segundo nombre): mismo inicio, mismo final y el nombre
+    # corto es subsecuencia ordenada del largo.
+    if motivo is None:
+        corto, largo = (ca, cb) if len(ca) <= len(cb) else (cb, ca)
+        if len(corto) >= 2 and len(corto) < len(largo) and corto[0] == largo[0] and corto[-1] == largo[-1]:
+            it = iter(largo)
+            if all(tok in it for tok in corto):
+                faltan = ' '.join(t for t in largo if t not in corto)
+                return 'MENOR', f'Palabras intermedias omitidas en un nombre (difiere: «{faltan}»)'
+
     if motivo is None:
         sim = SequenceMatcher(None, ' '.join(ca), ' '.join(cb)).ratio()
         sa, sb = set(ca), set(cb)
         if sa and sb and (sa < sb or sb < sa):
-            base = ('Un nombre contiene al otro (nombre truncado, ampliado, sigla o nombre comercial): '
-                    'verificar identidad del proveedor.')
+            base = ('Un nombre contiene al otro con palabras antepuestas o intercaladas (posible nombre '
+                    'comercial): verificar identidad del proveedor.')
         else:
             base = 'Razón social sustancialmente distinta: verificar identidad del proveedor.'
         extra = (f' La similitud textual ({sim:.0%}) es solo un indicio y no basta para aprobarla.'

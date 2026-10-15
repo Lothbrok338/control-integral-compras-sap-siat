@@ -22,6 +22,14 @@ from sinteticos import escenario, escribir_sap, escribir_siat, sap_row, siat_row
     ('CIA ANDINA SA', 'COMPAÑIA ANDINA S.A.', 'Abreviatura'),
     ('JOSÉ  PÉREZ', 'JOSE PEREZ', 'formato'),
     ('SOCIEDAD ANONIMA DEL SUR', 'S.A. SUR', 'formato'),
+    # nombre ampliado/abreviado al final (ejemplos indicados por el usuario)
+    ('BOLIVIAN GLOBAL INVESTMENT S.A.', 'BOLIVIAN GLOBAL INVESTMENT SA BOGIN SA', 'al final'),
+    ('ADMINISTRADORA DE TARJETAS DE CREDITO S.A.', 'ADMINISTRADORA DE TARJETAS DE CREDITO S.A. - A.T.C. S.A.', 'al final'),
+    ('COOPERATIVA DE SERVICIOS PUBLICOS "SANTA CRUZ" S.R.L.', 'COOPERATIVA DE SERVICIOS PÚBLICOS SANTA CRUZ R.L. SAGUAPAC R.L.', 'al final'),
+    ('JISETH VANESA MARTINEZ CHOQUE', 'JISETH VANESA MARTÍNEZ', 'al final'),
+    ('SERVICIO MUNICIPAL DE AGUA POTABLE Y ALCANTARILLADO SANITARIO', 'SERVICIO MUNICIPAL DE AGUA POTABLE Y ALCANTARILLADO', 'al final'),
+    ('CAJA PETROLERA DE SALUD DEPTAL STA CRUZ', 'CAJA PETROLERA DE SALUD', 'al final'),
+    ('CALEB GODOY ZEGARRA', 'CALEB MISAEL GODOY ZEGARRA', 'intermedias'),
 ])
 def test_variaciones_menores_con_nit_consistente(sap, siat, motivo):
     nivel, texto = cl.clasificar_razon_social(sap, siat, '123')
@@ -35,7 +43,13 @@ def test_variaciones_menores_con_nit_consistente(sap, siat, motivo):
     ('UNIVALLE S.A.', 'UNIVERSIDAD PRIVADA DEL VALLE S.A.'),         # sigla sin equivalencia verificada
     ('PEDRO RUIZ SRL', 'PEDRO RUIZ LTDA'),                           # forma jurídica distinta
     ('PEDRO RUIZ', 'PEDRO RUIZ SRL'),                                # forma jurídica omitida
-    ('CAJA PETROLERA DE SALUD DEPTAL STA CRUZ', 'CAJA PETROLERA DE SALUD'),  # un nombre contiene al otro
+    ('PEDRO RUIZ', 'FERRETERIA PEDRO RUIZ SRL'),                      # nombre comercial ANTEPUESTO
+    ('FELIX MARTINEZ SALGUEIRO', 'COMPLEJO INDUSTRIAL DE MADERA COMINMA DE FELIX MARTINEZ SALGUEIRO'),
+    ('ELFEC', 'EMPRESA DE LUZ Y FUERZA ELECTRICA COCHABAMBA S.A.'),  # sigla sin equivalencia verificada
+    ('JUAN PEREZ', 'JUAN'),                                           # un solo token: no basta
+    ('JUANA LUISA SANCHEZ ZAMBRANA', 'MOLECULAR BIOLOGY SYSTEMS DE JUANA LUISA SANCHEZ ZAMBRANA'),  # comercial antepuesto
+    ('SALUD INTEGRAL FAMILIAR S.A. SINFA S.A.', 'SINFA S.A.'),         # solo la sigla
+    ('JUAN PEREZ GOMEZ', 'PEDRO PEREZ GOMEZ'),                         # distinto inicio
     ('JUAN PEREZ', 'JUANA PEREZ'),                                   # similitud alta, token corto: no se aprueba
     ('', 'ALGO SA'),
 ])

@@ -25,6 +25,6 @@ La autoría técnica se conserva como metadato del motor y también en las propi
 
 ## Clasificación de diferencias (CONTROL GENERAL vs DIFERENCIAS MENORES)
 - **CONTROL GENERAL** (revisión prioritaria): `CRÍTICA · IDENTIFICADOR` (NIT, autorización/CUF, factura, DUI/DIM), `CRÍTICA · IMPORTE O TRIBUTARIO` (importes fuera de tolerancia, tipo de compra, código de control), `CRÍTICA · FECHA` y `REVISIÓN DE IDENTIDAD` (razón social no equivalente con NIT coincidente).
-- **DIFERENCIAS MENORES** (informativa, pestaña amarilla): razón social con variación solo formal (puntuación, tildes, orden de nombres, abreviaturas estándar, ortografía leve) con NIT, factura y autorización coincidentes, y redondeos dentro de la tolerancia sin otras discrepancias.
+- **DIFERENCIAS MENORES** (informativa, pestaña amarilla): razón social con variación solo formal (puntuación, tildes, orden de nombres, abreviaturas estándar, ortografía leve, nombre ampliado/abreviado al final como sigla o apellido omitido, palabras intermedias omitidas) con NIT, factura y autorización coincidentes, y redondeos dentro de la tolerancia sin otras discrepancias.
 - Una diferencia menor **nunca** oculta una crítica. La similitud textual no aprueba nada por sí sola. Siglas y nombres comerciales solo se aceptan si están en `equivalencias_verificadas.json` para ese NIT.
 - Las facturas sin diferencias no se exportan, pero se cuentan en los indicadores de la app.

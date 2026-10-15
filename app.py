@@ -1,9 +1,11 @@
+import base64
 import hashlib
 import os
 import tempfile
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from motor_auditoria import run_audit, __project__, __version__
 from reporte_operativo import generar_reporte_operativo
@@ -607,6 +609,7 @@ if run:
         st.session_state["metrics"] = metrics
         st.session_state["metadata_diagnostico"] = diagnostico
         st.session_state["input_fingerprint"] = current_fingerprint
+        st.session_state["auto_download_pending"] = True  # descarga automática al terminar el cruce
 
         progress.progress(100, text="Auditoría finalizada correctamente")
         st.success("✓ Auditoría completada. Revisa el resumen y descarga el reporte Excel.")
@@ -652,6 +655,31 @@ if st.session_state.get("metrics"):
 # =========================================================
 if st.session_state.get("result_bytes"):
     st.markdown('<div class="uv-section-title">Reporte final</div>', unsafe_allow_html=True)
+
+    # Descarga automática, una sola vez por cruce (los reruns posteriores no la repiten).
+    if st.session_state.pop("auto_download_pending", False):
+        _b64 = base64.b64encode(st.session_state["result_bytes"]).decode("ascii")
+        components.html(
+            f"""
+            <script>
+            (function () {{
+                const bin = atob("{_b64}");
+                const bytes = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                const blob = new Blob([bytes], {{type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "REPORTE_OPERATIVO_COMPRAS_SAP_SIAT.xlsx";
+                (document.body || document.documentElement).appendChild(a);
+                a.click();
+                setTimeout(function () {{ URL.revokeObjectURL(url); a.remove(); }}, 4000);
+            }})();
+            </script>
+            """,
+            height=0,
+        )
+        st.success("✓ Reporte descargado automáticamente. Si tu navegador lo bloqueó, usa el botón de abajo.")
 
     st.download_button(
         "DESCARGAR REPORTE EXCEL",

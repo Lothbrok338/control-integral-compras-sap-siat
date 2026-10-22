@@ -9,6 +9,7 @@ import streamlit.components.v1 as components
 
 from motor_auditoria import run_audit, __project__, __version__
 from reporte_operativo import generar_reporte_operativo
+from adaptador_siat import adaptar_siat
 
 # =========================================================
 # METADATOS DEL PROYECTO
@@ -585,6 +586,7 @@ if run:
     st.session_state.pop("result_bytes", None)
     st.session_state.pop("metrics", None)
     st.session_state.pop("metadata_diagnostico", None)
+    st.session_state.pop("adaptacion_siat", None)
 
     progress = st.progress(0, text="Preparando archivos...")
 
@@ -598,13 +600,17 @@ if run:
             sap_path.write_bytes(sap_file.getvalue())
             siat_path.write_bytes(siat_file.getvalue())
 
+            # El motor existente espera CSV con |. El adaptador conserva sus reglas.
+            siat_para_motor = td / "SIAT_NORMALIZADO_COMPATIBLE.csv"
+            diagnostico_adaptacion = adaptar_siat(siat_path, siat_para_motor)
+
             progress.progress(15, text="Validando estructura y normalizando datos...")
             progress.progress(32, text="Revisando y reparando incidencias del CSV SIAT...")
             progress.progress(48, text="Identificando y emparejando facturas...")
 
             _, metrics = run_audit(
                 sap_path,
-                siat_path,
+                siat_para_motor,
                 output_path=out_path,
                 round_tol=float(round_tol),
             )
@@ -624,6 +630,7 @@ if run:
         st.session_state["result_bytes"] = result_bytes
         st.session_state["metrics"] = metrics
         st.session_state["metadata_diagnostico"] = diagnostico
+        st.session_state["adaptacion_siat"] = diagnostico_adaptacion
         st.session_state["input_fingerprint"] = current_fingerprint
         st.session_state["auto_download_pending"] = True  # descarga automática al terminar el cruce
 
@@ -652,6 +659,24 @@ if st.session_state.get("metrics"):
     b.metric("Registros SIAT", _format_count(m["siat"]))
     c.metric("Emparejadas", _format_count(m["matched"]))
     d.metric("Sin diferencias", _format_count(m["ok"]))
+
+    adapt = st.session_state.get("adaptacion_siat") or {}
+    if adapt:
+        n = adapt.get("filas")
+        cant = f"{n:,}".replace(",", ".") if n is not None else "archivo original"
+        st.caption(
+            f"Entrada SIAT: {adapt.get('formato', 'desconocido')} · "
+            f"registros: {cant} · "
+            f"reparaciones estructurales verificadas: {len(adapt.get('reparaciones', []))}."
+        )
+        if adapt.get("reparaciones"):
+            with st.expander("Ver trazabilidad de reparaciones SIAT"):
+                for reparacion in adapt["reparaciones"]:
+                    st.write(
+                        f"Correlativo {reparacion['correlativo']} · "
+                        f"{reparacion['tipo']} · "
+                        f"línea(s) {', '.join(str(x) for x in reparacion['lineas'])}"
+                    )
 
     if ind:
         st.markdown("**Para revisar en SAP** · hoja CONTROL GENERAL y POR CONCILIAR")

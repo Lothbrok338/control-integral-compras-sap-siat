@@ -136,10 +136,10 @@ def test_clasificacion_integrada_con_el_motor(tmp_path):
     pares = [
         _par(1, 'INTERCOM LTDA.', 'INTERCOM L.T.D.A.'),                                   # menor
         _par(2, 'MARCELO PINTO MACEDO', 'PINTO MACEDO MARCELO'),                          # menor
-        _par(3, 'EMPRESA UNO SRL', 'COMERCIAL OTRA SRL'),                                 # revisión de identidad
+        _par(3, 'EMPRESA UNO SRL', 'COMERCIAL OTRA SRL'),                                 # solo razón social -> menor aunque distinta
         _par(4, 'CRISIL SRL.', 'CRISIL S.R.L.', nit_siat='3999999999'),                  # NIT distinto + nombre formal -> crítica
         _par(5, 'ACME LTDA.', 'ACME L.T.D.A.', total=100.0, total_siat=130.0),            # menor + importe -> crítica
-        _par(6, 'BETA SA', 'BETA S.A.', total=100.0, total_siat=100.03),                  # menor + redondeo
+        _par(6, 'BETA SA', 'BETA S.A.', total=100.0, total_siat=100.03),                  # razón social + redondeo -> revisión
         _par(7, 'GAMA SA', 'GAMA SA', total=100.0, total_siat=100.03),                    # solo redondeo
         _par(8, 'DELTA SA', 'DELTA SA', fecha_siat='2025-02-11', over={18: '87.03'}),     # fecha crítica + redondeo
         _par(9, 'EPSILON SA', 'EPSILON SA'),                                              # OK
@@ -147,8 +147,8 @@ def test_clasificacion_integrada_con_el_motor(tmp_path):
     control, menores, m, diag = _corrida(tmp_path, pares)
 
     # --- destino de cada factura
-    assert set(control) == {'3', '4', '5', '8'}
-    assert set(menores) == {'1', '2', '6', '7'}
+    assert set(control) == {'4', '5', '6', '8'}
+    assert set(menores) == {'1', '2', '3', '7'}
     assert '9' not in control and '9' not in menores                     # OK no se exporta
     assert not set(control) & set(menores)                                # nunca en ambas pestañas
 
@@ -163,14 +163,17 @@ def test_clasificacion_integrada_con_el_motor(tmp_path):
     assert control['8']['ESTADO'] == 'CRÍTICA · FECHA'
     assert 'redondeo' in control['8']['VALOR EN SAP']                    # el redondeo acompaña a la crítica
 
-    # --- identidad dudosa permanece en CONTROL GENERAL
-    assert control['3']['ESTADO'] == 'REVISIÓN DE IDENTIDAD'
-    assert control['3']['RAZÓN SOCIAL SIAT'] == 'COMERCIAL OTRA SRL'
+    # --- diferencia exclusiva de razón social va a menores aunque sea distinta
+    assert menores['3']['RAZÓN SOCIAL SIAT'] == 'COMERCIAL OTRA SRL'
+    assert 'Identidad NO verificada' in menores['3']['MOTIVO DE CLASIFICACIÓN MENOR']
+    # --- razón social + un redondeo ya incluye otra variable: CONTROL GENERAL
+    assert control['6']['ESTADO'] == 'REVISIÓN DE IDENTIDAD'
+    assert 'redondeo' in control['6']['VALOR EN SAP']
 
     # --- menores con su motivo
     assert menores['1']['TIPO DE DIFERENCIA'] == 'RAZÓN SOCIAL'
     assert menores['2']['MOTIVO DE CLASIFICACIÓN MENOR'] == 'Cambio de orden de nombres y apellidos'
-    assert menores['6']['TIPO DE DIFERENCIA'] == 'RAZÓN SOCIAL + REDONDEO'
+    assert menores['3']['TIPO DE DIFERENCIA'] == 'RAZÓN SOCIAL'
     assert menores['7']['TIPO DE DIFERENCIA'] == 'REDONDEO'
     assert all(r['MOTIVO DE CLASIFICACIÓN MENOR'] for r in menores.values())
 
@@ -184,13 +187,17 @@ def test_clasificacion_integrada_con_el_motor(tmp_path):
     assert m['matched'] == 9 and m['ok'] == 1
 
 
-def test_todo_diferente_de_razon_social_con_nit_consistente_usa_equivalencia_verificada(tmp_path):
+def test_solo_razon_social_distinta_siempre_va_a_menores(tmp_path):
     pares = [_par(1, 'SIGLA PRUEBA', 'SOCIEDAD DE PRUEBA INTEGRAL')]
     nit = pares[0][0]['nit']
     control, menores, *_ = _corrida(tmp_path, pares)
-    assert set(control) == {'1'} and not menores                         # sin verificación: revisión
-    control, menores, *_ = _corrida(tmp_path, pares, eq=[{'nit': nit, 'nombres': ['SIGLA PRUEBA', 'SOCIEDAD DE PRUEBA INTEGRAL']}])
-    assert set(menores) == {'1'} and not control                         # verificada para ese NIT
+    assert set(menores) == {'1'} and not control
+    assert 'Identidad NO verificada' in menores['1']['MOTIVO DE CLASIFICACIÓN MENOR']
+    control, menores, *_ = _corrida(
+        tmp_path, pares,
+        eq=[{'nit': nit, 'nombres': ['SIGLA PRUEBA', 'SOCIEDAD DE PRUEBA INTEGRAL']}])
+    assert set(menores) == {'1'} and not control
+    assert 'Equivalencia de nombre verificada' in menores['1']['MOTIVO DE CLASIFICACIÓN MENOR']
 
 
 def test_invariante_ninguna_critica_en_menores(tmp_path):
@@ -218,3 +225,35 @@ def test_autorizacion_o_factura_distinta_con_mismo_nit_no_deja_aprobar_el_nombre
     assert control['1']['ESTADO'] == 'CRÍTICA · IDENTIFICADOR'
     assert 'Código de autorización' in control['1']['CAMPOS CON DIFERENCIA']
     assert 'Razón social: REVISIÓN DE IDENTIDAD' in control['1']['CLASIFICACIÓN POR CAMPO']
+
+
+def test_regla_exclusividad_razon_social_con_otros_campos(tmp_path):
+    """Solo razón social a menor; con CUF, monto, fecha o redondeo va a revisión."""
+    pares = [
+        _par(11, 'PROVEEDOR ALFA SRL', 'PERSONA COMPLETAMENTE DIFERENTE'),
+        _par(12, 'PROVEEDOR BETA SRL', 'PERSONA COMPLETAMENTE DIFERENTE',
+             over={3: 'OTRA-AUTORIZACION-CUF-12345'}),
+        _par(13, 'PROVEEDOR GAMMA SRL', 'PERSONA COMPLETAMENTE DIFERENTE',
+             total=100.0, total_siat=140.0),
+        _par(14, 'PROVEEDOR DELTA SRL', 'PERSONA COMPLETAMENTE DIFERENTE',
+             fecha_siat='2025-02-11'),
+        _par(15, 'PROVEEDOR EPSILON SRL', 'PERSONA COMPLETAMENTE DIFERENTE',
+             total=100.0, total_siat=100.03),
+        _par(16, 'PROVEEDOR ZETA SRL', 'PERSONA COMPLETAMENTE DIFERENTE',
+             nit_siat='9876543210'),
+        _par(17, 'PROVEEDOR ETA SRL', 'PROVEEDOR ETA SRL',
+             total=100.0, total_siat=100.03),
+    ]
+    control, menores, motor, diag = _corrida(tmp_path, pares)
+    assert set(menores) == {'11', '17'}
+    assert set(control) == {'12', '13', '14', '15', '16'}
+    assert control['12']['ESTADO'] == 'CRÍTICA · IDENTIFICADOR'
+    assert 'Código de autorización' in control['12']['CAMPOS CON DIFERENCIA']
+    assert control['13']['ESTADO'] == 'CRÍTICA · IMPORTE O TRIBUTARIO'
+    assert control['14']['ESTADO'] == 'CRÍTICA · FECHA'
+    assert control['15']['ESTADO'] == 'REVISIÓN DE IDENTIDAD'
+    assert control['16']['ESTADO'] == 'CRÍTICA · IDENTIFICADOR'
+    assert menores['11']['TIPO DE DIFERENCIA'] == 'RAZÓN SOCIAL'
+    assert menores['17']['TIPO DE DIFERENCIA'] == 'REDONDEO'
+    assert diag['indicadores']['emparejadas'] == motor['matched'] == 7
+    assert set(control).isdisjoint(set(menores))

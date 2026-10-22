@@ -1,0 +1,27 @@
+name: Pruebas Control de Compras
+on:
+  push:
+    branches: [main, "fix/clasificacion-solo-razon-social-menores"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Instalar dependencias
+        run: |
+          python -m pip install -r requirements.txt pytest
+      - name: Compilar Python
+        run: |
+          python -m compileall -q app.py adaptador_siat.py motor_auditoria.py reporte_operativo.py clasificacion.py tests
+      - name: Ejecutar pruebas
+        run: |
+          python -m pytest -q tests

@@ -8,7 +8,7 @@ produce un Excel de solo tres pestañas:
   1. CONTROL GENERAL       solo diferencias críticas o de identidad (A=ESTADO,
                            B=CAMPOS CON DIFERENCIA, C=USUARIO SAP, D=N.º ASIENTO SAP)
   2. POR CONCILIAR         sin pareja (solo SAP / solo SIAT) y posibles emparejamientos
-  3. DIFERENCIAS MENORES   informativas: razón social con variación formal y redondeos
+  3. DIFERENCIAS MENORES   informativas: exclusivamente razón social o exclusivamente redondeo
 
 Usuario y asiento SAP solo se asignan con evidencia verificable: la fila de
 origen del motor (``_FILA_ORIGEN``) debe coincidir en NIT + factura (+ código de
@@ -558,7 +558,8 @@ def _hoja_menores(wb, items: list[dict], meta: dict, auth: dict) -> int:
     ws['A1'].comment = Comment(
         'Diferencias informativas de baja prioridad. Que una fila esté aquí NO significa que el dato '
         'esté corregido ni aprobado: solo que no requiere revisión prioritaria. Se separaron del '
-        'CONTROL GENERAL porque el NIT, la factura y la autorización coinciden.', 'Control SAP–SIAT')
+        'CONTROL GENERAL por tratarse de la única diferencia de razón social o por solo redondeo. '
+        'No supone aprobación de la identidad del proveedor.', 'Control SAP–SIAT')
     return len(filas)
 
 
@@ -633,7 +634,7 @@ def _indicadores(items, control, solo_sap, solo_siat, candidatos, diag) -> dict:
         'criticas': n.get('CRITICA', 0),
         'criticas_identificador': estados.get(CRIT_IDENT, 0),
         'revision_identidad': n.get('IDENTIDAD', 0),
-        'menores_nominales': n_nominal,       # razón social con variación formal (con o sin redondeo)
+        'menores_nominales': n_nominal,       # únicamente razón social, sin ninguna otra discrepancia
         'solo_redondeo': n_red,               # solo redondeo dentro de tolerancia
         'en_control_general': n.get('CRITICA', 0) + n.get('IDENTIDAD', 0),
         'en_menores': len(menores),

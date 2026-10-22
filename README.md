@@ -34,10 +34,11 @@ La aplicación puede protegerse definiendo el secreto/variable `AUDITOR_PASSWORD
 La autoría técnica se conserva como metadato del motor y también en las propiedades internas de los reportes Excel generados.
 
 ## Clasificación de diferencias (CONTROL GENERAL vs DIFERENCIAS MENORES)
-- **CONTROL GENERAL** (revisión prioritaria): `CRÍTICA · IDENTIFICADOR` (NIT, autorización/CUF, factura, DUI/DIM), `CRÍTICA · IMPORTE O TRIBUTARIO` (importes fuera de tolerancia, tipo de compra, código de control), `CRÍTICA · FECHA` y `REVISIÓN DE IDENTIDAD` (razón social no equivalente con NIT coincidente).
-- **DIFERENCIAS MENORES** (informativa, pestaña amarilla): razón social con variación solo formal (puntuación, tildes, orden de nombres, abreviaturas estándar, ortografía leve, nombre ampliado/abreviado al final como sigla o apellido omitido, palabras intermedias omitidas) con NIT, factura y autorización coincidentes, y redondeos dentro de la tolerancia sin otras discrepancias.
-- Una diferencia menor **nunca** oculta una crítica. La similitud textual no aprueba nada por sí sola. Siglas y nombres comerciales solo se aceptan si están en `equivalencias_verificadas.json` para ese NIT.
-- Las facturas sin diferencias no se exportan, pero se cuentan en los indicadores de la app.
+
+- **DIFERENCIAS MENORES** (pestaña amarilla): facturas emparejadas cuya **única** discrepancia es la razón social, incluso si los nombres son muy distintos, y facturas que solo presentan redondeo dentro de la tolerancia. Se muestran ambos nombres y el motivo; **no se valida ni aprueba automáticamente la identidad**.
+- **CONTROL GENERAL**: toda factura con razón social diferente **más cualquier otra discrepancia**, incluso CUF/autorización, NIT, número de factura, fecha, importes o redondeo. También cualquier diferencia crítica sin razón social y los demás casos que requieran revisión.
+- **POR CONCILIAR**: facturas SAP/SIAT no emparejadas y candidatos pendientes; nunca se reclasifican como menores solo por semejanza de nombres.
+- **Seguridad**: el motor de emparejamiento no cambia, no se borra ninguna diferencia y las incidencias en otros campos mantienen su gravedad. La hoja de menores es informativa, no representa aprobación.
 
 ## Equivalencias de nombre verificadas
 - `equivalencias_verificadas.json`: pares de nombres que el personal verificó como el mismo contribuyente, **ligados a un NIT**. Este repositorio es **público**: aquí solo van empresas e instituciones.

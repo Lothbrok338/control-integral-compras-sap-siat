@@ -9,6 +9,7 @@ import streamlit.components.v1 as components
 
 from motor_auditoria import run_audit, __project__, __version__
 from reporte_operativo import generar_reporte_operativo
+from panel_ejecutivo import mostrar_panel_ejecutivo
 from adaptador_siat import adaptar_siat
 
 # =========================================================
@@ -647,83 +648,88 @@ if run:
 # RESULTADOS
 # =========================================================
 if st.session_state.get("metrics"):
-    m = st.session_state["metrics"]
-
-    diag = st.session_state.get("metadata_diagnostico") or {}
-    ind = diag.get("indicadores") or {}
-
-    st.markdown('<div class="uv-section-title">Resumen de auditoría</div>', unsafe_allow_html=True)
-
-    a, b, c, d = st.columns(4, gap="medium")
-    a.metric("Registros SAP", _format_count(m["sap"]))
-    b.metric("Registros SIAT", _format_count(m["siat"]))
-    c.metric("Emparejadas", _format_count(m["matched"]))
-    d.metric("Sin diferencias", _format_count(m["ok"]))
-
-    adapt = st.session_state.get("adaptacion_siat") or {}
-    if adapt:
-        n = adapt.get("filas")
-        cant = f"{n:,}".replace(",", ".") if n is not None else "archivo original"
-        st.caption(
-            f"Entrada SIAT: {adapt.get('formato', 'desconocido')} · "
-            f"registros: {cant} · "
-            f"reparaciones estructurales verificadas: {len(adapt.get('reparaciones', []))}."
+    if st.session_state.get("result_bytes"):
+        mostrar_panel_ejecutivo(
+            st.session_state["result_bytes"], st.session_state["metrics"]
         )
-        if adapt.get("reparaciones"):
-            with st.expander("Ver trazabilidad de reparaciones SIAT"):
-                for reparacion in adapt["reparaciones"]:
-                    st.write(
-                        f"Correlativo {reparacion['correlativo']} · "
-                        f"{reparacion['tipo']} · "
-                        f"línea(s) {', '.join(str(x) for x in reparacion['lineas'])}"
-                    )
+    with st.expander("📋 Ver métricas técnicas y diagnóstico del cruce", expanded=False):
+        m = st.session_state["metrics"]
 
-    if ind:
-        st.markdown("**Para revisar en SAP** · hoja CONTROL GENERAL y POR CONCILIAR")
-        a, b, c, d = st.columns(4, gap="medium")
-        a.metric("Diferencias críticas", _format_count(ind["criticas"]),
-                 help="NIT, factura, autorización, importes fuera de tolerancia, tipo de compra o fecha.")
-        b.metric("Revisión de identidad", _format_count(ind["revision_identidad"]),
-                 help="Razón social no equivalente o equivalencia no verificable, con NIT coincidente.")
-        c.metric("Sin correspondencia", _format_count(ind["solo_sap"] + ind["solo_siat"]),
-                 help=f"Solo SAP: {ind['solo_sap']} · Solo SIAT: {ind['solo_siat']}.")
-        d.metric("Posibles emparejamientos", _format_count(ind["candidatos"]),
-                 help="Candidatos que requieren validación manual; no se aceptan automáticamente.")
+        diag = st.session_state.get("metadata_diagnostico") or {}
+        ind = diag.get("indicadores") or {}
 
-        st.markdown("**Informativas** · hoja DIFERENCIAS MENORES (baja prioridad)")
+        st.markdown('<div class="uv-section-title">Resumen de auditoría</div>', unsafe_allow_html=True)
+
         a, b, c, d = st.columns(4, gap="medium")
-        a.metric("Solo razón social", _format_count(ind["menores_nominales"]),
-                 help="La única discrepancia es razón social; incluso cuando los nombres son muy distintos. No implica identidad verificada.")
-        b.metric("Solo redondeo", _format_count(ind["solo_redondeo"]),
-                 help="Diferencias dentro de la tolerancia, sin otras observaciones.")
-        with st.expander("¿Cómo se agruparon las cifras del motor?"):
-            st.markdown(
-                f"El motor original detectó **{_format_count(m['diff'])} facturas con diferencias** y "
-                f"**{_format_count(m['rounding'])} con redondeo**. Se mantienen sin cambios en la auditoría; "
-                "para el reporte se reagruparon así:\n\n"
-                f"- **{_format_count(ind['criticas'])} críticas** y **{_format_count(ind['revision_identidad'])} de "
-                "revisión de identidad** → CONTROL GENERAL.\n"
-                f"- **{_format_count(ind['menores_nominales'])} solo razón social** y "
-                f"**{_format_count(ind['solo_redondeo'])} solo redondeo** → DIFERENCIAS MENORES.\n"
-                f"- **{_format_count(ind['sin_diferencias'])} sin diferencias** no aparecen en el Excel.\n\n"
-                "Una diferencia menor nunca oculta una crítica: si la factura tiene cualquier diferencia "
-                "crítica o de identidad, permanece completa en CONTROL GENERAL."
+        a.metric("Registros SAP", _format_count(m["sap"]))
+        b.metric("Registros SIAT", _format_count(m["siat"]))
+        c.metric("Emparejadas", _format_count(m["matched"]))
+        d.metric("Sin diferencias", _format_count(m["ok"]))
+
+        adapt = st.session_state.get("adaptacion_siat") or {}
+        if adapt:
+            n = adapt.get("filas")
+            cant = f"{n:,}".replace(",", ".") if n is not None else "archivo original"
+            st.caption(
+                f"Entrada SIAT: {adapt.get('formato', 'desconocido')} · "
+                f"registros: {cant} · "
+                f"reparaciones estructurales verificadas: {len(adapt.get('reparaciones', []))}."
             )
-    else:
-        a, b, c, d = st.columns(4, gap="medium")
-        a.metric("Con diferencias", _format_count(m["diff"]))
-        b.metric("Revisar redondeo", _format_count(m["rounding"]))
-        c.metric("Solo SAP", _format_count(m["solo_sap"]))
-        d.metric("Solo SIAT", _format_count(m["solo_siat"]))
+            if adapt.get("reparaciones"):
+                with st.expander("Ver trazabilidad de reparaciones SIAT"):
+                    for reparacion in adapt["reparaciones"]:
+                        st.write(
+                            f"Correlativo {reparacion['correlativo']} · "
+                            f"{reparacion['tipo']} · "
+                            f"línea(s) {', '.join(str(x) for x in reparacion['lineas'])}"
+                        )
 
-    if diag:
-        st.caption(
-            f"Trazabilidad SAP: usuario recuperado en {diag.get('filas_con_usuario', 0)} y asiento en "
-            f"{diag.get('filas_con_asiento', 0)} de {diag.get('total_sap', 0)} registros SAP. "
-            "Los valores sin identificación segura quedan vacíos."
-        )
-        for advertencia in diag.get("advertencias", []):
-            st.warning(advertencia)
+        if ind:
+            st.markdown("**Para revisar en SAP** · hoja CONTROL GENERAL y POR CONCILIAR")
+            a, b, c, d = st.columns(4, gap="medium")
+            a.metric("Diferencias críticas", _format_count(ind["criticas"]),
+                     help="NIT, factura, autorización, importes fuera de tolerancia, tipo de compra o fecha.")
+            b.metric("Revisión de identidad", _format_count(ind["revision_identidad"]),
+                     help="Razón social no equivalente o equivalencia no verificable, con NIT coincidente.")
+            c.metric("Sin correspondencia", _format_count(ind["solo_sap"] + ind["solo_siat"]),
+                     help=f"Solo SAP: {ind['solo_sap']} · Solo SIAT: {ind['solo_siat']}.")
+            d.metric("Posibles emparejamientos", _format_count(ind["candidatos"]),
+                     help="Candidatos que requieren validación manual; no se aceptan automáticamente.")
+
+            st.markdown("**Informativas** · hoja DIFERENCIAS MENORES (baja prioridad)")
+            a, b, c, d = st.columns(4, gap="medium")
+            a.metric("Solo razón social", _format_count(ind["menores_nominales"]),
+                     help="La única discrepancia es razón social; incluso cuando los nombres son muy distintos. No implica identidad verificada.")
+            b.metric("Solo redondeo", _format_count(ind["solo_redondeo"]),
+                     help="Diferencias dentro de la tolerancia, sin otras observaciones.")
+            with st.expander("¿Cómo se agruparon las cifras del motor?"):
+                st.markdown(
+                    f"El motor original detectó **{_format_count(m['diff'])} facturas con diferencias** y "
+                    f"**{_format_count(m['rounding'])} con redondeo**. Se mantienen sin cambios en la auditoría; "
+                    "para el reporte se reagruparon así:\n\n"
+                    f"- **{_format_count(ind['criticas'])} críticas** y **{_format_count(ind['revision_identidad'])} de "
+                    "revisión de identidad** → CONTROL GENERAL.\n"
+                    f"- **{_format_count(ind['menores_nominales'])} solo razón social** y "
+                    f"**{_format_count(ind['solo_redondeo'])} solo redondeo** → DIFERENCIAS MENORES.\n"
+                    f"- **{_format_count(ind['sin_diferencias'])} sin diferencias** no aparecen en el Excel.\n\n"
+                    "Una diferencia menor nunca oculta una crítica: si la factura tiene cualquier diferencia "
+                    "crítica o de identidad, permanece completa en CONTROL GENERAL."
+                )
+        else:
+            a, b, c, d = st.columns(4, gap="medium")
+            a.metric("Con diferencias", _format_count(m["diff"]))
+            b.metric("Revisar redondeo", _format_count(m["rounding"]))
+            c.metric("Solo SAP", _format_count(m["solo_sap"]))
+            d.metric("Solo SIAT", _format_count(m["solo_siat"]))
+
+        if diag:
+            st.caption(
+                f"Trazabilidad SAP: usuario recuperado en {diag.get('filas_con_usuario', 0)} y asiento en "
+                f"{diag.get('filas_con_asiento', 0)} de {diag.get('total_sap', 0)} registros SAP. "
+                "Los valores sin identificación segura quedan vacíos."
+            )
+            for advertencia in diag.get("advertencias", []):
+                st.warning(advertencia)
 
 # =========================================================
 # DESCARGA

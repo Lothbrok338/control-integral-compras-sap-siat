@@ -311,15 +311,37 @@ def clasificar_facturas(control: list[dict], diferencias: list[dict], redondeos:
         nit_ok = (not _vacio(reg.get('NIT SAP')) and str(reg.get('NIT SAP')) == str(reg.get('NIT SIAT'))
                   and 'IDENT' not in grupos)
 
+        # Política operativa: la ÚNICA diferencia de razón social se informa
+        # en DIFERENCIAS MENORES, aunque los nombres sean sustancialmente distintos.
+        # Esto NO equivale a aprobar la identidad del proveedor.
+        # Si hay además CUF, NIT, factura, importe, fecha, código u OTRO campo
+        # (incluidos redondeos) la factura permanece en CONTROL GENERAL.
+        solo_razon_social = grupos == {'RAZON'} and not redond.get(par)
+        razon_y_redondeo = grupos == {'RAZON'} and bool(redond.get(par))
+
         hay_identidad = False
         for c in campos:
             if c['grupo'] != 'RAZON':
                 continue
             if not nit_ok:
-                nivel, motivo = 'REVISION', 'No evaluable como menor: el NIT, factura o autorización presentan diferencias.'
+                nivel, motivo = 'REVISION', 'No evaluable como menor: falta NIT verificable o hay diferencias de identificador.'
             else:
-                nivel, motivo = clasificar_razon_social(c['valor_sap'], c['valor_siat'],
-                                                        str(reg.get('NIT SAP')), equivalencias)
+                nivel_nombre, motivo_nombre = clasificar_razon_social(
+                    c['valor_sap'], c['valor_siat'],
+                    str(reg.get('NIT SAP')), equivalencias
+                )
+                if solo_razon_social:
+                    nivel = 'MENOR'
+                    motivo = (motivo_nombre if nivel_nombre == 'MENOR'
+                              else 'Única diferencia: razón social. Identidad NO verificada; '
+                                   'se reporta como informativa para revisión posterior. '
+                                   + motivo_nombre)
+                elif razon_y_redondeo:
+                    nivel = 'REVISION'
+                    motivo = ('Razón social + otra variable (redondeo): '
+                              'mantener en CONTROL GENERAL. ' + motivo_nombre)
+                else:
+                    nivel, motivo = nivel_nombre, motivo_nombre
             c['motivo'] = motivo
             c['tag'] = TAG_MENOR if nivel == 'MENOR' else TAG_IDENTIDAD
             hay_identidad |= nivel == 'REVISION'

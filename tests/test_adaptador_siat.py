@@ -39,6 +39,20 @@ def test_coma_en_razon_social(tmp_path):
     assert salida.read_text(encoding="utf-8").splitlines()[1].split("|")[2] == razon
 
 
+def test_varias_comas_sin_comillas_en_razon_social(tmp_path):
+    origen, salida = tmp_path / "in.csv", tmp_path / "out.csv"
+    razon = "EMPRESA ABC, DIVISIÓN COMERCIAL, SRL"
+    origen.write_text(
+        ",".join(COLUMNAS) + "\n" +
+        ",".join(fila_base(razon=razon)) + "\n",
+        encoding="utf-8",
+    )
+    d = adaptar_siat(origen, salida)
+    assert d["filas"] == 1
+    assert len(d["reparaciones"]) == 1
+    assert salida.read_text(encoding="utf-8").splitlines()[1].split("|")[2] == razon
+
+
 def test_razon_social_partida_en_dos_lineas(tmp_path):
     origen, salida = tmp_path / "in.csv", tmp_path / "out.csv"
     fila = fila_base(razon="EMPRESA ABC De: Maria Perez")

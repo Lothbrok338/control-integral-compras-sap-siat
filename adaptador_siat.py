@@ -103,14 +103,16 @@ def adaptar_siat(ruta_entrada: str | Path, ruta_salida: str | Path) -> dict[str,
         if len(campos) == 3:
             pendiente = (linea, campos)
             continue
-        if len(campos) == 25:
-            corregida = (campos[:2] +
-                         [campos[2].rstrip() + ', ' + campos[3].lstrip()] +
-                         campos[4:])
+        if len(campos) > 24:
+            # Corrige una o varias comas SIN COMILLAS dentro del nombre.
+            # Preserva NIT y correlativo, y las 21 columnas restantes.
+            # Solo se considera segura cuando valida todos los anclajes.
+            razon_social = ', '.join(x.strip() for x in campos[2:len(campos) - 21])
+            corregida = campos[:2] + [razon_social] + campos[len(campos) - 21:]
             if _valida(corregida):
                 filas.append(corregida)
                 reparaciones.append({
-                    'tipo': 'coma interna en razón social',
+                    'tipo': 'separadores internos en razón social',
                     'lineas': [linea],
                     'correlativo': corregida[0],
                 })

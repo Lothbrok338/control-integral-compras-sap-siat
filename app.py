@@ -692,8 +692,8 @@ if st.session_state.get("metrics"):
 
         st.markdown("**Informativas** · hoja DIFERENCIAS MENORES (baja prioridad)")
         a, b, c, d = st.columns(4, gap="medium")
-        a.metric("Nominales menores", _format_count(ind["menores_nominales"]),
-                 help="Razón social con variación solo formal (puntuación, orden, ortografía leve) y NIT coincidente.")
+        a.metric("Solo razón social", _format_count(ind["menores_nominales"]),
+                 help="La única discrepancia es razón social; incluso cuando los nombres son muy distintos. No implica identidad verificada.")
         b.metric("Solo redondeo", _format_count(ind["solo_redondeo"]),
                  help="Diferencias dentro de la tolerancia, sin otras observaciones.")
         with st.expander("¿Cómo se agruparon las cifras del motor?"):
@@ -703,7 +703,7 @@ if st.session_state.get("metrics"):
                 "para el reporte se reagruparon así:\n\n"
                 f"- **{_format_count(ind['criticas'])} críticas** y **{_format_count(ind['revision_identidad'])} de "
                 "revisión de identidad** → CONTROL GENERAL.\n"
-                f"- **{_format_count(ind['menores_nominales'])} nominales menores** y "
+                f"- **{_format_count(ind['menores_nominales'])} solo razón social** y "
                 f"**{_format_count(ind['solo_redondeo'])} solo redondeo** → DIFERENCIAS MENORES.\n"
                 f"- **{_format_count(ind['sin_diferencias'])} sin diferencias** no aparecen en el Excel.\n\n"
                 "Una diferencia menor nunca oculta una crítica: si la factura tiene cualquier diferencia "

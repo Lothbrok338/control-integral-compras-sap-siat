@@ -4,6 +4,7 @@ Aplicación Streamlit para auditar archivos de compras SAP contra el libro de co
 
 ## Archivos
 - `app.py`: interfaz web.
+- `panel_ejecutivo.py`: panel de auditoría con indicadores de revisión, agrupación de causas y facturas desplegables (solo lectura, alimentado desde el Excel final).
 - `adaptador_siat.py`: compatibilidad con CSV SIAT separados por comas o por |; conserva el archivo original y bloquea reparaciones inciertas.
 - `motor_auditoria.py`: motor de normalización, reparación, emparejamiento y auditoría (lógica validada; no se modifica).
 - `reporte_operativo.py`: capa posterior a `run_audit()` que genera el Excel final de 3 pestañas (CONTROL GENERAL, POR CONCILIAR, DIFERENCIAS MENORES) y recupera usuario y asiento SAP del Excel original solo con evidencia verificable (NIT + factura + autorización); si hay duda deja la celda vacía y advierte.
@@ -32,6 +33,12 @@ La aplicación puede protegerse definiendo el secreto/variable `AUDITOR_PASSWORD
 
 ## Autoría
 La autoría técnica se conserva como metadato del motor y también en las propiedades internas de los reportes Excel generados.
+
+## Panel ejecutivo de facturas
+
+La aplicación presenta un resumen ejecutivo con facturas conciliadas, observaciones prioritarias, pendientes y diferencias informativas. Tres pestañas permiten buscar por factura, NIT, proveedor, asiento o usuario SAP y desplegar cada documento para ver sus discrepancias de campo SAP vs SIAT. Se muestran los importes de mayor a menor. El diagnóstico técnico anterior queda bajo un desplegable.
+
+El panel **lee el Excel operativo generado** y no altera datos originales, reglas tributarias, emparejamientos ni el archivo descargable.
 
 ## Clasificación de diferencias (CONTROL GENERAL vs DIFERENCIAS MENORES)
 
